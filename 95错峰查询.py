@@ -4,6 +4,67 @@ from datetime import datetime, timedelta, timezone
 import math
 import os
 
+import requests
+
+def get_billing_time_from_api(day_date):
+    """
+    从接口获取指定日期的计费时间点 (RealTime)
+    """
+    url = "http://100.83.3.236:10090/2019-03-01/statistics/GetP2PBillingData"
+    headers = {
+        "X-KSC-ACCOUNT-ID": "73400809",
+        "Content-Type": "application/json",
+        "X-action": "GetERNBillingData"
+    }
+    
+    start_time_str = day_date.strftime("%Y-%m-%dT00:00+0800")
+    end_time_str = (day_date + timedelta(days=1) - timedelta(seconds=1)).strftime("%Y-%m-%dT23:59+0800")
+    
+    body = {
+        "StartTime": start_time_str,
+        "EndTime": end_time_str,
+        "DomainNames": "",
+        "BillingMode": "peak95bw"
+    }
+    
+    try:
+        print(f"正在从接口获取 {day_date.strftime('%Y-%m-%d')} 的计费时间...")
+        response = requests.post(url, headers=headers, json=body, timeout=10)
+        response.raise_for_status() # 如果状态码不是 2xx，则抛出异常
+        
+        data = response.json()
+        real_time_str = data.get("RealTime")
+        
+        if real_time_str:
+            # 尝试解析多种可能的日期格式
+            dt_obj = None
+            # 格式1: '2026-03-05T22:30+0800' (无秒)
+            # 格式2: '2026-03-05T22:30:00+0800' (有秒)
+            # 格式3: '2026-03-05 22:30:00' (旧格式)
+            for fmt in ("%Y-%m-%dT%H:%M%z", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%d %H:%M:%S"):
+                try:
+                    dt_obj = datetime.strptime(real_time_str, fmt)
+                    break # 解析成功，跳出循环
+                except ValueError:
+                    continue # 格式不匹配，尝试下一个
+            
+            if dt_obj:
+                return dt_obj.strftime("%H:%M")
+            else:
+                print(f"❌ 无法解析接口返回的日期格式: {real_time_str}")
+                return None
+        else:
+            print(f"⚠️ 接口未返回 {day_date.strftime('%Y-%m-%d')} 的 RealTime")
+            return None
+            
+    except requests.exceptions.RequestException as e:
+        print(f"❌ 调用接口失败: {e}")
+        return None
+    except (ValueError, KeyError) as e:
+        print(f"❌ 解析接口返回数据失败: {e}")
+        return None
+
+
 def connect_to_es(es_url, username=None, password=None):
     """
     连接到Elasticsearch服务器
@@ -430,12 +491,17 @@ def main():
     start_date_str = input("请输入开始日期 (YYYY-MM-DD): ").strip()
     end_date_str = input("请输入结束日期 (YYYY-MM-DD): ").strip()
     
-    specified_time_str = input("请输入指定窗口时间 (HH:MM，如 11:30，可选): ").strip()
-    if not specified_time_str:
-        specified_time_str = None
-    else:
+    specified_time_input = input("请输入指定窗口时间 (HH:MM，或输入 auto 自动获取，可选): ").strip()
+    
+    auto_fetch_time = False
+    specified_time_str = None
+    
+    if specified_time_input.lower() == 'auto':
+        auto_fetch_time = True
+    elif specified_time_input:
         try:
-            datetime.strptime(specified_time_str, "%H:%M")
+            datetime.strptime(specified_time_input, "%H:%M")
+            specified_time_str = specified_time_input
         except ValueError:
             print("❌ 时间格式错误，请使用 HH:MM 格式")
             return
@@ -454,15 +520,39 @@ def main():
     es = connect_to_es(ES_URL, USERNAME, PASSWORD)
     if not es:
         return
+
+    # 如果是自动模式，预先获取所有日期的计费时间
+    daily_specified_times = {}
+    api_times_records = []
+    if auto_fetch_time:
+        print("\n>>> 正在批量获取接口计费时间... <<<")
+        temp_date = start_date
+        while temp_date <= end_date:
+            time_str = get_billing_time_from_api(temp_date)
+            if time_str:
+                daily_specified_times[temp_date.strftime('%Y-%m-%d')] = time_str
+                api_times_records.append({
+                    "日期": temp_date.strftime('%Y-%m-%d'),
+                    "接口获取时间": time_str
+                })
+            temp_date += timedelta(days=1)
     
     all_results = {} # channel -> { 'total': [], 'isp': [], 'raw': [] }
     early_peak_records = [] 
+    diff_summary_records = [] # 用于汇总所有渠道的带宽差
     
     for channel in srm_channels:
         print(f"\n>>> 正在处理渠道: {channel} <<<")
         channel_results = {'total': [], 'isp': [], 'raw': []}
         current_date = start_date
         while current_date <= end_date:
+            # 如果是自动模式，从预获取的字典中查找时间
+            if auto_fetch_time:
+                current_date_str = current_date.strftime('%Y-%m-%d')
+                specified_time_str = daily_specified_times.get(current_date_str)
+                if not specified_time_str:
+                    print(f"未获取到 {current_date_str} 的计费时间，跳过带宽差计算")
+            
             curr_index = f"eds_billing-{current_date.strftime('%Y%m%d')}"
             prev_date = current_date - timedelta(days=1)
             prev_index = f"eds_billing-{prev_date.strftime('%Y%m%d')}"
@@ -471,8 +561,20 @@ def main():
             day_data = get_95_peak_for_day(es, target_indices, channel, current_date, specified_time_str)
             if day_data:
                 if day_data['channel_peak']:
-                    channel_results['total'].append(day_data['channel_peak'])
-                    tp_str = day_data['channel_peak'].get("time_point", "")
+                    peak_data = day_data['channel_peak']
+                    channel_results['total'].append(peak_data)
+                    
+                    # 收集带宽差汇总数据 (如果指定了时间)
+                    if specified_time_str and "diff" in peak_data:
+                        diff_summary_records.append({
+                            "日期": peak_data["date"],
+                            "渠道ID": channel,
+                            "95峰值": peak_data["bandwidth"],
+                            "渠道在当天大盘95时间点带宽": peak_data["specified_bandwidth"],
+                            "带宽差": peak_data["diff"]
+                        })
+
+                    tp_str = peak_data.get("time_point", "")
                     if tp_str:
                         try:
                             hour = int(tp_str.split(":")[0])
@@ -519,6 +621,16 @@ def main():
                     df_early = pd.DataFrame(early_peak_records)
                     df_early = df_early[["时间戳", "维度", "运营商", "上行带宽", "渠道ID"]]
                     df_early.to_excel(writer, sheet_name="12点前峰值汇总", index=False)
+                
+                if api_times_records:
+                    df_api_times = pd.DataFrame(api_times_records)
+                    df_api_times.to_excel(writer, sheet_name="接口获取时间", index=False)
+                    print(f"✅ 已写入 {len(api_times_records)} 条记录到 Sheet: 接口获取时间")
+
+                if diff_summary_records:
+                    df_diff = pd.DataFrame(diff_summary_records)
+                    df_diff.to_excel(writer, sheet_name="渠道带宽差汇总", index=False)
+                    print(f"✅ 已写入 {len(diff_summary_records)} 条记录到 Sheet: 渠道带宽差汇总")
                 
                 for channel, results in all_results.items():
                     # 合并渠道总计和 ISP 细分 (Sheet 1: 95峰值汇总)
