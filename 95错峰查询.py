@@ -38,7 +38,7 @@ def get_billing_time_from_api(day_date):
         if real_time_str:
             # 尝试解析多种可能的日期格式
             dt_obj = None
-            # 格式1: '2026-03-05T22:30+0800' (无秒)
+            # 格式1: '2026-03-05T22:30+0800' 无秒
             # 格式2: '2026-03-05T22:30:00+0800' (有秒)
             # 格式3: '2026-03-05 22:30:00' (旧格式)
             for fmt in ("%Y-%m-%dT%H:%M%z", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%d %H:%M:%S"):
@@ -568,6 +568,8 @@ def main():
                     if specified_time_str and "diff" in peak_data:
                         diff_summary_records.append({
                             "日期": peak_data["date"],
+                            "维度": "渠道汇总",
+                            "运营商": "ALL",
                             "渠道ID": channel,
                             "95峰值": peak_data["bandwidth"],
                             "渠道在当天大盘95时间点带宽": peak_data["specified_bandwidth"],
@@ -590,6 +592,19 @@ def main():
 
                 for isp_res in day_data['isp_peaks']:
                     channel_results['isp'].append(isp_res)
+                    
+                    # 同时收集运营商维度的带宽差数据
+                    if specified_time_str and "diff" in isp_res:
+                        diff_summary_records.append({
+                            "日期": isp_res["date"],
+                            "维度": "运营商细分",
+                            "运营商": isp_res.get("isp", "unknown"),
+                            "渠道ID": channel,
+                            "95峰值": isp_res["bandwidth"],
+                            "渠道在当天大盘95时间点带宽": isp_res["specified_bandwidth"],
+                            "带宽差": isp_res["diff"]
+                        })
+
                     tp_str = isp_res.get("time_point", "")
                     if tp_str:
                         try:
@@ -629,6 +644,9 @@ def main():
 
                 if diff_summary_records:
                     df_diff = pd.DataFrame(diff_summary_records)
+                    # 调整列顺序
+                    diff_cols = ["日期", "维度", "运营商", "渠道ID", "95峰值", "渠道在当天大盘95时间点带宽", "带宽差"]
+                    df_diff = df_diff[diff_cols]
                     df_diff.to_excel(writer, sheet_name="渠道带宽差汇总", index=False)
                     print(f"✅ 已写入 {len(diff_summary_records)} 条记录到 Sheet: 渠道带宽差汇总")
                 
