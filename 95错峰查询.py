@@ -136,6 +136,41 @@ def get_95_peak_for_day(es, index_pattern, channel, day_date, specified_time_str
                         }
                     }
                 }
+            },
+            "by_program_name": {
+                "terms": {"field": "program_name", "size": 100}, # 使用 program_name 直接聚合
+                "aggs": {
+                    "by_5min": {
+                        "date_histogram": {
+                            "field": "@timestamp",
+                            "fixed_interval": "5m",
+                            "min_doc_count": 0,
+                            "time_zone": "+08:00",
+                            "extended_bounds": {
+                                "min": start_str,
+                                "max": end_str
+                            }
+                        },
+                        "aggs": {
+                            "total_up_flow": {"sum": {"field": "up_flow"}}
+                        }
+                    }
+                }
+            },
+            "by_5min_total": { # 新增：用于计算渠道总流量
+                "date_histogram": {
+                    "field": "@timestamp",
+                    "fixed_interval": "5m",
+                    "min_doc_count": 0,
+                    "time_zone": "+08:00",
+                    "extended_bounds": {
+                        "min": start_str,
+                        "max": end_str
+                    }
+                },
+                "aggs": {
+                    "total_up_flow": {"sum": {"field": "up_flow"}}
+                }
             }
         }
     }
@@ -147,16 +182,73 @@ def get_95_peak_for_day(es, index_pattern, channel, day_date, specified_time_str
         return None
 
     isp_buckets = resp.get("aggregations", {}).get("by_isp", {}).get("buckets", [])
-    if not isp_buckets:
+    program_name_buckets = resp.get("aggregations", {}).get("by_program_name", {}).get("buckets", [])
+    total_5min_buckets = resp.get("aggregations", {}).get("by_5min_total", {}).get("buckets", [])
+    
+    if not isp_buckets and not program_name_buckets and not total_5min_buckets:
         print(f"⚠️ 日期 {day_date.strftime('%Y-%m-%d')} 无数据")
         return None
         
     isp_results = []
-    raw_data_points = [] # list of {date, timestamp, dimension, isp, bandwidth}
+    program_name_results = []
+    raw_data_points = [] # list of {date, timestamp, dimension, isp, program_name, bandwidth}
     
-    # 用来存储整个渠道的总和点位
-    channel_total_points = {} # timestamp -> sum_up_flow
+    # --- 计算渠道总维度的 95 峰值 ---
+    channel_data_points = []
+    channel_specified_bandwidth = None
     
+    for bucket in total_5min_buckets:
+        sum_up_flow = bucket.get("total_up_flow", {}).get("value", 0)
+        avg_bw = (sum_up_flow * 8) / 300 / 1024
+        
+        ts_ms = bucket['key']
+        ts_dt = datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.utc).astimezone(timezone(timedelta(hours=8)))
+        ts_dt = ts_dt.replace(tzinfo=None)
+        
+        channel_data_points.append({
+            "timestamp": ts_dt,
+            "bandwidth": avg_bw
+        })
+        # 添加到明细数据
+        raw_data_points.append({
+            "日期": day_date.strftime("%Y-%m-%d"),
+            "时间": ts_dt.strftime("%H:%M"),
+            "维度": "渠道汇总",
+            "运营商": "ALL",
+            "节目名称": "ALL", # 渠道汇总维度不区分节目名称
+            "上行带宽": avg_bw
+        })
+        if specified_time_str and ts_dt.strftime("%H:%M") == specified_time_str:
+            channel_specified_bandwidth = avg_bw
+            
+    sorted_channel = sorted(channel_data_points, key=lambda x: x["bandwidth"], reverse=True)
+    count_ch = len(sorted_channel)
+    channel_result = None
+    if count_ch > 0:
+        rank_ch = math.ceil(count_ch * 0.05)
+        idx_ch = rank_ch - 1
+        if idx_ch < 0: idx_ch = 0
+        if idx_ch >= count_ch: idx_ch = count_ch - 1
+        
+        target_ch = sorted_channel[idx_ch]
+        peak_ch = target_ch["bandwidth"]
+        
+        print(f"DEBUG: Channel Total, 日期 {day_date.strftime('%Y-%m-%d')}, 总点数: {count_ch}, 95%位置: 第 {rank_ch} 个, 时间 {target_ch['timestamp'].strftime('%H:%M')}, 峰值 {peak_ch:.4f}")
+        print("DEBUG: Channel Top 20 数据点:")
+        for i, p in enumerate(sorted_channel[:20]):
+            print(f"  {i+1}. {p['timestamp'].strftime('%H:%M')} : {p['bandwidth']:.4f}")
+            
+        channel_result = {
+            "date": day_date.strftime("%Y-%m-%d"),
+            "bandwidth": peak_ch,
+            "time_point": target_ch["timestamp"].strftime("%H:%M")
+        }
+        if specified_time_str:
+            if channel_specified_bandwidth is None: channel_specified_bandwidth = 0
+            channel_result["specified_bandwidth"] = channel_specified_bandwidth
+            channel_result["diff"] = peak_ch - channel_specified_bandwidth
+            
+    # --- 处理 ISP 维度数据 ---
     for isp_bucket in isp_buckets:
         isp_name = isp_bucket["key"]
         buckets = isp_bucket.get("by_5min", {}).get("buckets", [])
@@ -185,13 +277,9 @@ def get_95_peak_for_day(es, index_pattern, channel, day_date, specified_time_str
                 "时间": ts_dt.strftime("%H:%M"),
                 "维度": "运营商细分",
                 "运营商": isp_name,
+                "节目名称": "ALL", # ISP 维度不区分节目名称
                 "上行带宽": avg_bw
             })
-            
-            # 累加到渠道总和
-            if ts_dt not in channel_total_points:
-                channel_total_points[ts_dt] = 0
-            channel_total_points[ts_dt] += sum_up_flow
             
             if specified_time_str:
                 if ts_dt.strftime("%H:%M") == specified_time_str:
@@ -228,56 +316,61 @@ def get_95_peak_for_day(es, index_pattern, channel, day_date, specified_time_str
             
         isp_results.append(res)
         
-    # 计算渠道总维度的 95 峰值
-    channel_data_points = []
-    channel_specified_bandwidth = None
-    for ts_dt, total_flow in channel_total_points.items():
-        avg_bw = (total_flow * 8) / 300 / 1024
-        channel_data_points.append({
-            "timestamp": ts_dt,
-            "bandwidth": avg_bw
-        })
-        # 添加到明细数据
-        raw_data_points.append({
-            "日期": day_date.strftime("%Y-%m-%d"),
-            "时间": ts_dt.strftime("%H:%M"),
-            "维度": "渠道汇总",
-            "运营商": "ALL",
-            "上行带宽": avg_bw
-        })
-        if specified_time_str and ts_dt.strftime("%H:%M") == specified_time_str:
-            channel_specified_bandwidth = avg_bw
-            
-    sorted_channel = sorted(channel_data_points, key=lambda x: x["bandwidth"], reverse=True)
-    count_ch = len(sorted_channel)
-    channel_result = None
-    if count_ch > 0:
-        rank_ch = math.ceil(count_ch * 0.05)
-        idx_ch = rank_ch - 1
-        if idx_ch < 0: idx_ch = 0
-        if idx_ch >= count_ch: idx_ch = count_ch - 1
+    # --- 处理 program_name 维度数据 ---
+    for program_bucket in program_name_buckets:
+        program_name = program_bucket["key"]
+        buckets = program_bucket.get("by_5min", {}).get("buckets", [])
         
-        target_ch = sorted_channel[idx_ch]
-        peak_ch = target_ch["bandwidth"]
-        
-        print(f"DEBUG: Channel Total, 日期 {day_date.strftime('%Y-%m-%d')}, 总点数: {count_ch}, 95%位置: 第 {rank_ch} 个, 时间 {target_ch['timestamp'].strftime('%H:%M')}, 峰值 {peak_ch:.4f}")
-        print("DEBUG: Channel Top 20 数据点:")
-        for i, p in enumerate(sorted_channel[:20]):
-            print(f"  {i+1}. {p['timestamp'].strftime('%H:%M')} : {p['bandwidth']:.4f}")
+        data_points = []
+        for bucket in buckets:
+            sum_up_flow = bucket.get("total_up_flow", {}).get("value", 0)
+            avg_bw = (sum_up_flow * 8) / 300 / 1024
             
-        channel_result = {
+            ts_ms = bucket['key']
+            ts_dt = datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.utc).astimezone(timezone(timedelta(hours=8)))
+            ts_dt = ts_dt.replace(tzinfo=None)
+            
+            data_points.append({
+                "timestamp": ts_dt,
+                "bandwidth": avg_bw
+            })
+            
+            # 添加到明细数据
+            raw_data_points.append({
+                "日期": day_date.strftime("%Y-%m-%d"),
+                "时间": ts_dt.strftime("%H:%M"),
+                "维度": "节目名称细分",
+                "运营商": "ALL", # 节目名称维度不区分运营商
+                "节目名称": program_name,
+                "上行带宽": avg_bw
+            })
+            
+        sorted_points = sorted(data_points, key=lambda x: x["bandwidth"], reverse=True)
+        count = len(sorted_points)
+        if count == 0:
+            continue
+            
+        rank = math.ceil(count * 0.05)
+        index = rank - 1
+        if index < 0: index = 0
+        if index >= count: index = count - 1
+        
+        target_point = sorted_points[index]
+        peak_95_bandwidth = target_point["bandwidth"]
+        
+        print(f"DEBUG: Program Name {program_name}, 日期 {day_date.strftime('%Y-%m-%d')}, 总点数: {count}, 95%位置: 第 {rank} 个, 时间 {target_point['timestamp'].strftime('%H:%M')}, 峰值 {peak_95_bandwidth:.4f}")
+        
+        program_name_results.append({
             "date": day_date.strftime("%Y-%m-%d"),
-            "bandwidth": peak_ch,
-            "time_point": target_ch["timestamp"].strftime("%H:%M")
-        }
-        if specified_time_str:
-            if channel_specified_bandwidth is None: channel_specified_bandwidth = 0
-            channel_result["specified_bandwidth"] = channel_specified_bandwidth
-            channel_result["diff"] = peak_ch - channel_specified_bandwidth
-            
+            "program_name": program_name,
+            "bandwidth": peak_95_bandwidth,
+            "time_point": target_point["timestamp"].strftime("%H:%M")
+        })
+        
     return {
         "channel_peak": channel_result,
         "isp_peaks": isp_results,
+        "program_peaks": program_name_results,
         "raw_data_points": raw_data_points
     }
 
@@ -537,13 +630,14 @@ def main():
                 })
             temp_date += timedelta(days=1)
     
-    all_results = {} # channel -> { 'total': [], 'isp': [], 'raw': [] }
+    all_results = {} # channel -> { 'total': [], 'isp': [], 'raw': [], 'program': [] }
     early_peak_records = [] 
     diff_summary_records = [] # 用于汇总所有渠道的带宽差
+    program_name_summary_records = [] # 用于汇总所有渠道的节目名称峰值
     
     for channel in srm_channels:
         print(f"\n>>> 正在处理渠道: {channel} <<<")
-        channel_results = {'total': [], 'isp': [], 'raw': []}
+        channel_results = {'total': [], 'isp': [], 'raw': [], 'program': []}
         current_date = start_date
         while current_date <= end_date:
             # 如果是自动模式，从预获取的字典中查找时间
@@ -619,13 +713,25 @@ def main():
                                 })
                         except ValueError: pass
                 
+                # 收集节目名称维度的峰值数据
+                if 'program_peaks' in day_data and day_data['program_peaks']:
+                    for program_res in day_data['program_peaks']:
+                        program_name_summary_records.append({
+                            "日期": program_res["date"],
+                            "渠道ID": channel,
+                            "节目名称": program_res["program_name"],
+                            "95峰值": program_res["bandwidth"],
+                            "峰值时间": program_res["time_point"]
+                        })
+                        channel_results['program'].append(program_res) # 也添加到 channel_results
+                
                 # 收集明细数据
                 if 'raw_data_points' in day_data:
                     channel_results['raw'].extend(day_data['raw_data_points'])
                     
             current_date += timedelta(days=1)
             
-        if channel_results['total'] or channel_results['isp']:
+        if channel_results['total'] or channel_results['isp'] or channel_results['program']:
             all_results[channel] = channel_results
         
     if all_results:
@@ -649,6 +755,11 @@ def main():
                     df_diff = df_diff[diff_cols]
                     df_diff.to_excel(writer, sheet_name="渠道带宽差汇总", index=False)
                     print(f"✅ 已写入 {len(diff_summary_records)} 条记录到 Sheet: 渠道带宽差汇总")
+                
+                if program_name_summary_records:
+                    df_program = pd.DataFrame(program_name_summary_records)
+                    df_program.to_excel(writer, sheet_name="按节目名称95峰值汇总", index=False)
+                    print(f"✅ 已写入 {len(program_name_summary_records)} 条记录到 Sheet: 按节目名称95峰值汇总")
                 
                 for channel, results in all_results.items():
                     # 合并渠道总计和 ISP 细分 (Sheet 1: 95峰值汇总)
