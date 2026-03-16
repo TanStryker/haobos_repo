@@ -131,8 +131,8 @@ def get_business_95_peak_times(es, index_pattern, day_date):
             data_points = []
             for bucket in buckets:
                 sum_up_flow = bucket.get("total_up_flow", {}).get("value", 0)
-                # 业务大盘逻辑：原始数据 * 8 / 300
-                avg_bw = (sum_up_flow * 8) / 300
+                # 业务大盘逻辑：原始数据辑* 8 / 300 / 1000000000据 * 8 / 300 / 1000000000
+                avg_bw = (sum_up_flow * 8) / 3001000000
                 
                 ts_ms = bucket['key']
                 ts_dt = datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.utc).astimezone(timezone(timedelta(hours=8)))
@@ -342,7 +342,7 @@ def get_95_peak_for_day(es, index_pattern, channel, day_date, specified_times_di
         for bucket in buckets:
             sum_up_flow = bucket.get("total_up_flow", {}).get("value", 0)
             # 使用业务大盘逻辑：* 8 / 300
-            avg_bw = (sum_up_flow * 8) / 300
+            avg_bw = (sum_up_flow * 8) / 300/1000000000
             
             ts_ms = bucket['key']
             ts_dt = datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.utc).astimezone(timezone(timedelta(hours=8)))
@@ -379,7 +379,7 @@ def get_95_peak_for_day(es, index_pattern, channel, day_date, specified_times_di
     
     for bucket in total_5min_buckets:
         sum_up_flow = bucket.get("total_up_flow", {}).get("value", 0)
-        avg_bw = (sum_up_flow * 8) / 300 / 1024
+        avg_bw = (sum_up_flow * 8) / 300 / 1024/1000000
         
         ts_ms = bucket['key']
         ts_dt = datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.utc).astimezone(timezone(timedelta(hours=8)))
@@ -445,7 +445,7 @@ def get_95_peak_for_day(es, index_pattern, channel, day_date, specified_times_di
         
         for bucket in buckets:
             sum_up_flow = bucket.get("total_up_flow", {}).get("value", 0)
-            avg_bw = (sum_up_flow * 8) / 300 / 1024
+            avg_bw = (sum_up_flow * 8) / 300 / 1024/1000000
             
             ts_ms = bucket['key']
             ts_dt = datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.utc).astimezone(timezone(timedelta(hours=8)))
@@ -514,7 +514,7 @@ def get_95_peak_for_day(es, index_pattern, channel, day_date, specified_times_di
         data_points = []
         for bucket in buckets:
             sum_up_flow = bucket.get("total_up_flow", {}).get("value", 0)
-            avg_bw = (sum_up_flow * 8) / 300 / 1024
+            avg_bw = (sum_up_flow * 8) / 300 / 1024/1000000
             
             ts_ms = bucket['key']
             ts_dt = datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.utc).astimezone(timezone(timedelta(hours=8)))
@@ -660,7 +660,7 @@ def scan_early_peak_channels(es, start_date, end_date):
                 data_points = []
                 for bucket in buckets:
                     sum_up_flow = bucket.get("total_up_flow", {}).get("value", 0)
-                    avg_bw = (sum_up_flow * 8) / 300 / 1024
+                    avg_bw = (sum_up_flow * 8) / 300 / 1024/1000000
                     
                     ts_ms = bucket['key']
                     ts_dt = datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.utc).astimezone(timezone(timedelta(hours=8)))
@@ -695,7 +695,7 @@ def scan_early_peak_channels(es, start_date, end_date):
             # Calculate Channel Total 95 peak
             ch_data_points = []
             for ts, total_flow in ch_total_points.items():
-                ch_data_points.append({"timestamp": ts, "bandwidth": (total_flow * 8) / 300 / 1024})
+                ch_data_points.append({"timestamp": ts, "bandwidth": (total_flow * 8) / 300 / 1_000_000_000})
             
             sorted_ch = sorted(ch_data_points, key=lambda x: x["bandwidth"], reverse=True)
             if sorted_ch:
@@ -784,20 +784,28 @@ def main():
     output_mode_choice = input("请选择输出模式 (1/2, 默认1): ").strip()
     is_brief_mode = output_mode_choice != "2"
     
-    specified_time_input = input("\n请输入指定窗口时间 (HH:MM，或输入 auto 自动获取，可选): ").strip()
-    
-    auto_fetch_time = False
+    print("\n对比时间源:")
+    print("1. ERN (仅接口大盘时刻)")
+    print("2. EDS (仅业务大盘时刻: 快手, 字节, 小度)")
+    print("3. 全部 (ERN + EDS)")
+    print("4. 手动输入 (HH:MM)")
+    time_source_choice = input("请选择对比时间源 (1/2/3/4, 默认3): ").strip()
+
     specified_time_str = None
-    
-    if specified_time_input.lower() == 'auto':
-        auto_fetch_time = True
-    elif specified_time_input:
+    # 默认获取全部
+    fetch_ern = time_source_choice in ['1', '3', '']
+    fetch_eds = time_source_choice in ['2', '3', '']
+
+    if time_source_choice == '4':
+        specified_time_str = input("请输入指定窗口时间 (HH:MM): ").strip()
         try:
-            datetime.strptime(specified_time_input, "%H:%M")
-            specified_time_str = specified_time_input
+            datetime.strptime(specified_time_str, "%H:%M")
         except ValueError:
             print("❌ 时间格式错误，请使用 HH:MM 格式")
             return
+        # 手动模式下，不自动获取任何数据
+        fetch_ern = False
+        fetch_eds = False
     
     try:
         start_date = datetime.strptime(start_date_str, "%Y-%m-%d")
@@ -819,35 +827,38 @@ def main():
     daily_business_times = {} # {date_str: {biz_name: time_str}}
     api_times_records = []
     
-    print("\n>>> 正在批量获取接口计费时间及各业务大盘峰值时间... <<<")
-    temp_date = start_date
-    while temp_date <= end_date:
-        current_date_str = temp_date.strftime('%Y-%m-%d')
-        curr_index = f"eds_billing-{temp_date.strftime('%Y%m%d')}"
-        prev_date = temp_date - timedelta(days=1)
-        prev_index = f"eds_billing-{prev_date.strftime('%Y%m%d')}"
-        target_indices = f"{prev_index},{curr_index}"
-        
-        # 1. 获取接口计费时间 (如果选择了 auto)
-        if auto_fetch_time:
-            time_str = get_billing_time_from_api(temp_date)
-            if time_str:
-                daily_specified_times[current_date_str] = time_str
-                
-        # 2. 获取业务大盘峰值时间与带宽
-        biz_data = get_business_95_peak_times(es, target_indices, temp_date)
-        daily_business_times[current_date_str] = biz_data
-        
-        # 记录汇总到接口时间表
-        record = {"日期": current_date_str}
-        if auto_fetch_time:
-            record["接口获取时间"] = daily_specified_times.get(current_date_str, "N/A")
-        for biz_name, data in biz_data.items():
-            record[f"{biz_name}峰值时刻"] = data["time"]
-            record[f"{biz_name}95带宽"] = data["bandwidth"]
-        api_times_records.append(record)
-        
-        temp_date += timedelta(days=1)
+    if fetch_ern or fetch_eds:
+        print("\n>>> 正在批量获取对比时间源数据... <<<")
+        temp_date = start_date
+        while temp_date <= end_date:
+            current_date_str = temp_date.strftime('%Y-%m-%d')
+            curr_index = f"eds_billing-{temp_date.strftime('%Y%m%d')}"
+            prev_date = temp_date - timedelta(days=1)
+            prev_index = f"eds_billing-{prev_date.strftime('%Y%m%d')}"
+            target_indices = f"{prev_index},{curr_index}"
+            
+            # 1. 获取接口计费时间 (ERN)
+            if fetch_ern:
+                time_str = get_billing_time_from_api(temp_date)
+                if time_str:
+                    daily_specified_times[current_date_str] = time_str
+                    
+            # 2. 获取业务大盘峰值时间与带宽 (EDS)
+            if fetch_eds:
+                biz_data = get_business_95_peak_times(es, target_indices, temp_date)
+                daily_business_times[current_date_str] = biz_data
+            
+            # 记录汇总到接口时间表
+            record = {"日期": current_date_str}
+            if fetch_ern:
+                record["接口获取时间"] = daily_specified_times.get(current_date_str, "N/A")
+            if fetch_eds:
+                for biz_name, data in daily_business_times.get(current_date_str, {}).items():
+                    record[f"{biz_name}峰值时刻"] = data["time"]
+                    record[f"{biz_name}95带宽"] = data["bandwidth"]
+            api_times_records.append(record)
+            
+            temp_date += timedelta(days=1)
     
     all_results = {} # channel -> { 'total': [], 'isp': [], 'raw': [], 'program': [], 'business': [] }
     early_peak_records = [] 
@@ -867,7 +878,7 @@ def main():
             specified_times_for_day = {}
             
             # a. 添加大盘时间 (API 或手动输入)
-            if auto_fetch_time:
+            if fetch_ern:
                 api_time = daily_specified_times.get(current_date_str)
                 if api_time:
                     specified_times_for_day["渠道在当天大盘95时间点"] = api_time
@@ -875,9 +886,10 @@ def main():
                 specified_times_for_day["指定窗口时间"] = specified_time_str
             
             # b. 添加业务大盘时间
-            biz_data = daily_business_times.get(current_date_str, {})
-            for biz_name, data in biz_data.items():
-                specified_times_for_day[biz_name] = data["time"]
+            if fetch_eds:
+                biz_data = daily_business_times.get(current_date_str, {})
+                for biz_name, data in biz_data.items():
+                    specified_times_for_day[biz_name] = data["time"]
             
             curr_index = f"eds_billing-{current_date.strftime('%Y%m%d')}"
             prev_date = current_date - timedelta(days=1)
