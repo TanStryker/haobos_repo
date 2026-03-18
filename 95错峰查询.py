@@ -273,21 +273,26 @@ def get_95_peak_for_day(es, index_pattern, channel, day_date, specified_times_di
                 }
             },
             "by_program_name": {
-                "terms": {"field": "program_name", "size": 100}, # 使用 program_name 直接聚合
+                "terms": {"field": "program_name", "size": 100},
                 "aggs": {
-                    "by_5min": {
-                        "date_histogram": {
-                            "field": "@timestamp",
-                            "fixed_interval": "5m",
-                            "min_doc_count": 0,
-                            "time_zone": "+08:00",
-                            "extended_bounds": {
-                                "min": start_str,
-                                "max": end_str
-                            }
-                        },
+                    "by_isp": {
+                        "terms": {"field": "isp", "size": 10},
                         "aggs": {
-                            "total_up_flow": {"sum": {"field": "up_flow"}}
+                            "by_5min": {
+                                "date_histogram": {
+                                    "field": "@timestamp",
+                                    "fixed_interval": "5m",
+                                    "min_doc_count": 0,
+                                    "time_zone": "+08:00",
+                                    "extended_bounds": {
+                                        "min": start_str,
+                                        "max": end_str
+                                    }
+                                },
+                                "aggs": {
+                                    "total_up_flow": {"sum": {"field": "up_flow"}}
+                                }
+                            }
                         }
                     }
                 }
@@ -506,57 +511,78 @@ def get_95_peak_for_day(es, index_pattern, channel, day_date, specified_times_di
             
         isp_results.append(res)
         
-    # --- 处理 program_name 维度数据 ---
+    # --- 处理 program_name 维度数据 (嵌套 isp) ---
     for program_bucket in program_name_buckets:
         program_name = program_bucket["key"]
-        buckets = program_bucket.get("by_5min", {}).get("buckets", [])
+        isp_buckets_for_prog = program_bucket.get("by_isp", {}).get("buckets", [])
         
-        data_points = []
-        for bucket in buckets:
-            sum_up_flow = bucket.get("total_up_flow", {}).get("value", 0)
-            avg_bw = (sum_up_flow * 8) / 300 / 1024/1000000
+        for isp_bucket in isp_buckets_for_prog:
+            isp_name = isp_bucket["key"]
+            buckets = isp_bucket.get("by_5min", {}).get("buckets", [])
             
-            ts_ms = bucket['key']
-            ts_dt = datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.utc).astimezone(timezone(timedelta(hours=8)))
-            ts_dt = ts_dt.replace(tzinfo=None)
+            data_points = []
+            # Special handling for aurora
+            aurora_api_time_bandwidth = None
+            # The key for the API time is "渠道在当天大盘95时间点"
+            api_time_str = specified_times_dict.get("渠道在当天大盘95时间点")
+
+            for bucket in buckets:
+                sum_up_flow = bucket.get("total_up_flow", {}).get("value", 0)
+                # 统一单位为 Gbps
+                avg_bw = (sum_up_flow * 8) / 300 / 1_000_000_000
+                
+                ts_ms = bucket['key']
+                ts_dt = datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.utc).astimezone(timezone(timedelta(hours=8)))
+                ts_dt = ts_dt.replace(tzinfo=None)
+                
+                data_points.append({
+                    "timestamp": ts_dt,
+                    "bandwidth": avg_bw
+                })
+
+                # If it's aurora, find its bandwidth at the API peak time
+                if program_name == "aurora" and api_time_str and ts_dt.strftime("%H:%M") == api_time_str:
+                    aurora_api_time_bandwidth = avg_bw
+                
+                # 添加到明细数据
+                raw_data_points.append({
+                    "日期": day_date.strftime("%Y-%m-%d"),
+                    "时间": ts_dt.strftime("%H:%M"),
+                    "维度": "节目名称细分",
+                    "运营商": isp_name,
+                    "节目名称": program_name,
+                    "上行带宽": avg_bw
+                })
+                
+            sorted_points = sorted(data_points, key=lambda x: x["bandwidth"], reverse=True)
+            count = len(sorted_points)
+            if count == 0:
+                continue
+                
+            # 修正 95 峰值计算逻辑
+            rank = int(count * 0.05) + 1
+            index = rank - 1
+            if index < 0: index = 0
+            if index >= count: index = count - 1
             
-            data_points.append({
-                "timestamp": ts_dt,
-                "bandwidth": avg_bw
-            })
+            target_point = sorted_points[index]
+            peak_95_bandwidth = target_point["bandwidth"]
             
-            # 添加到明细数据
-            raw_data_points.append({
-                "日期": day_date.strftime("%Y-%m-%d"),
-                "时间": ts_dt.strftime("%H:%M"),
-                "维度": "节目名称细分",
-                "运营商": "ALL", # 节目名称维度不区分运营商
-                "节目名称": program_name,
-                "上行带宽": avg_bw
-            })
+            print(f"DEBUG: Program Name {program_name} (ISP: {isp_name}), 日期 {day_date.strftime('%Y-%m-%d')}, 总点数: {count}, 95%位置: 第 {rank} 个, 时间 {target_point['timestamp'].strftime('%H:%M')}, 峰值 {peak_95_bandwidth:.4f}")
             
-        sorted_points = sorted(data_points, key=lambda x: x["bandwidth"], reverse=True)
-        count = len(sorted_points)
-        if count == 0:
-            continue
-            
-        # 修正 95 峰值计算逻辑
-        rank = int(count * 0.05) + 1
-        index = rank - 1
-        if index < 0: index = 0
-        if index >= count: index = count - 1
-        
-        target_point = sorted_points[index]
-        peak_95_bandwidth = target_point["bandwidth"]
-        
-        print(f"DEBUG: Program Name {program_name}, 日期 {day_date.strftime('%Y-%m-%d')}, 总点数: {count}, 95%位置: 第 {rank} 个, 时间 {target_point['timestamp'].strftime('%H:%M')}, 峰值 {peak_95_bandwidth:.4f}")
-        
-        program_name_results.append({
-            "date": day_date.strftime("%Y-%m-%d"),
-            "program_name": program_name,
-            "bandwidth": peak_95_bandwidth,
-            "time_point": target_point["timestamp"].strftime("%H:%M")
-        })
+            program_result = {
+                "date": day_date.strftime("%Y-%m-%d"),
+                "program_name": program_name,
+                "isp": isp_name,
+                "bandwidth": peak_95_bandwidth,
+                "time_point": target_point["timestamp"].strftime("%H:%M")
+            }
+
+            # Add the special diff for aurora
+            if program_name == "aurora" and aurora_api_time_bandwidth is not None:
+                program_result["aurora_diff"] = peak_95_bandwidth - aurora_api_time_bandwidth
+
+            program_name_results.append(program_result)
         
     return {
         "channel_peak": channel_result,
@@ -987,13 +1013,18 @@ def main():
                 # 收集节目名称维度的峰值数据
                 if 'program_peaks' in day_data and day_data['program_peaks']:
                     for program_res in day_data['program_peaks']:
-                        program_name_summary_records.append({
+                        record = {
                             "日期": program_res["date"],
                             "渠道ID": channel,
                             "节目名称": program_res["program_name"],
+                            "运营商": program_res.get("isp", "ALL"),
                             "95峰值": program_res["bandwidth"],
                             "峰值时间": program_res["time_point"]
-                        })
+                        }
+                        if "aurora_diff" in program_res:
+                            record["Aurora错峰带宽"] = program_res["aurora_diff"]
+                        
+                        program_name_summary_records.append(record)
                         channel_results['program'].append(program_res) # 也添加到 channel_results
                 
                 # 收集明细数据
