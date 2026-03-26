@@ -525,6 +525,7 @@ def get_95_peak_for_day(es, index_pattern, channel, day_date, specified_times_di
             aurora_api_time_bandwidth = None
             # The key for the API time is "渠道在当天大盘95时间点"
             api_time_str = specified_times_dict.get("渠道在当天大盘95时间点")
+            daily_peak_bandwidth = None
 
             for bucket in buckets:
                 sum_up_flow = bucket.get("total_up_flow", {}).get("value", 0)
@@ -539,6 +540,9 @@ def get_95_peak_for_day(es, index_pattern, channel, day_date, specified_times_di
                     "timestamp": ts_dt,
                     "bandwidth": avg_bw
                 })
+
+                if daily_peak_bandwidth is None or avg_bw > daily_peak_bandwidth:
+                    daily_peak_bandwidth = avg_bw
 
                 # If it's aurora, find its bandwidth at the API peak time
                 if program_name == "aurora" and api_time_str and ts_dt.strftime("%H:%M") == api_time_str:
@@ -575,7 +579,8 @@ def get_95_peak_for_day(es, index_pattern, channel, day_date, specified_times_di
                 "program_name": program_name,
                 "isp": isp_name,
                 "bandwidth": peak_95_bandwidth,
-                "time_point": target_point["timestamp"].strftime("%H:%M")
+                "time_point": target_point["timestamp"].strftime("%H:%M"),
+                "daily_peak_bandwidth": daily_peak_bandwidth if daily_peak_bandwidth is not None else 0
             }
 
             # Add the special diff for aurora
@@ -1019,7 +1024,8 @@ def main():
                             "节目名称": program_res["program_name"],
                             "运营商": program_res.get("isp", "ALL"),
                             "95峰值": program_res["bandwidth"],
-                            "峰值时间": program_res["time_point"]
+                            "峰值时间": program_res["time_point"],
+                            "渠道分节目的单日峰值带宽": program_res.get("daily_peak_bandwidth", 0)
                         }
                         if "aurora_diff" in program_res:
                             record["Aurora错峰带宽"] = program_res["aurora_diff"]
