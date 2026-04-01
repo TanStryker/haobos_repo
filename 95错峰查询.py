@@ -186,6 +186,92 @@ def connect_to_es(es_url, username=None, password=None):
         print(f"❌ 连接Elasticsearch失败: {e}")
         return None
 
+def get_total_up_speed_gb_at_times(es, day_date, channel, target_times):
+    """
+    从 eds_machine_heartbeat-* 索引获取指定渠道在指定日期的 total_up_speed，
+    并返回指定时刻（5分钟窗口起始 HH:MM）的值（单位：Gb，按1000进制）。
+
+    5分钟粒度聚合：date_histogram + sum(total_up_speed)
+    数据处理算法：原始数据(KB) * 8 / 5，换算至Gb时进制为1000（Kb -> Gb：/1_000_000）
+    """
+    start_time = day_date
+    end_time = day_date + timedelta(days=1) - timedelta(seconds=1)
+    start_str = start_time.strftime("%Y-%m-%dT%H:%M:%S")
+    end_str = end_time.strftime("%Y-%m-%dT%H:%M:%S")
+
+    curr_index = f"eds_machine_heartbeat-{day_date.strftime('%Y%m%d')}"
+    prev_date = day_date - timedelta(days=1)
+    prev_index = f"eds_machine_heartbeat-{prev_date.strftime('%Y%m%d')}"
+    target_indices = f"{prev_index},{curr_index}"
+
+    query = {
+        "size": 0,
+        "query": {
+            "bool": {
+                "must": [
+                    {"term": {"srm_channel": channel}},
+                    {"range": {
+                        "@timestamp": {
+                            "gte": start_str,
+                            "lte": end_str,
+                            "time_zone": "+08:00"
+                        }
+                    }}
+                ]
+            }
+        },
+        "aggs": {
+            "by_5min": {
+                "date_histogram": {
+                    "field": "@timestamp",
+                    "fixed_interval": "5m",
+                    "min_doc_count": 0,
+                    "time_zone": "+08:00",
+                    "extended_bounds": {
+                        "min": start_str,
+                        "max": end_str
+                    }
+                },
+                "aggs": {
+                    "total_up_speed_sum": {"sum": {"field": "total_up_speed"}}
+                }
+            }
+        }
+    }
+
+    result = {t: 0 for t in target_times}
+    try:
+        resp = es.search(index=target_indices, body=query, ignore_unavailable=True)
+    except Exception as e:
+        print(f"❌ 查询 total_up_speed 失败 (channel={channel}, date={day_date.strftime('%Y-%m-%d')}): {e}")
+        return result
+
+    buckets = resp.get("aggregations", {}).get("by_5min", {}).get("buckets", [])
+    if not buckets:
+        return result
+
+    target_set = set(target_times)
+    for bucket in buckets:
+        ts_ms = bucket.get("key")
+        if ts_ms is None:
+            continue
+        ts_dt = datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.utc).astimezone(timezone(timedelta(hours=8)))
+        ts_dt = ts_dt.replace(tzinfo=None)
+        ts_str = ts_dt.strftime("%H:%M")
+        if ts_str not in target_set:
+            continue
+
+        raw_kb = bucket.get("total_up_speed_sum", {}).get("value", 0) or 0
+        gb_value = (raw_kb * 8) / 5 / 1_000_000
+        result[ts_str] = gb_value
+
+    return result
+
+def identify_shift_reason(shift_cost, up_00_gb, up_19_gb):
+    if shift_cost > 0 and up_00_gb > up_19_gb and (up_00_gb - up_19_gb) > 10:
+        return "供应商晚高峰前下架"
+    return ""
+
 def get_95_peak_for_day(es, index_pattern, channel, day_date, specified_times_dict=None):
     """
     查询指定日期的95峰值，以及多个可选的指定时间点带宽，按isp字段细分
@@ -678,6 +764,7 @@ def scan_early_peak_channels(es, start_date, end_date):
             continue
             
         channels_buckets = resp.get("aggregations", {}).get("by_channel", {}).get("buckets", [])
+        speed_cache_for_day = {}
         
         for ch_bucket in channels_buckets:
             channel_name = ch_bucket["key"]
@@ -718,12 +805,19 @@ def scan_early_peak_channels(es, start_date, end_date):
                     target_point = sorted_points[idx]
                     peak_time = target_point["timestamp"]
                     if 8 <= peak_time.hour <= 17:
+                        shift_cost = target_point["bandwidth"]
+                        up_speeds = speed_cache_for_day.get(channel_name)
+                        if up_speeds is None:
+                            up_speeds = get_total_up_speed_gb_at_times(es, current_date, channel_name, ["00:00", "19:00"])
+                            speed_cache_for_day[channel_name] = up_speeds
+                        reason = identify_shift_reason(shift_cost, up_speeds.get("00:00", 0), up_speeds.get("19:00", 0))
                         target_records.append({
                             "时间戳": peak_time.strftime("%Y-%m-%d %H:%M"),
                             "维度": "运营商细分",
                             "运营商": isp_name,
                             "上行带宽": target_point["bandwidth"],
-                            "渠道ID": channel_name
+                            "渠道ID": channel_name,
+                            "错峰原因": reason
                         })
             
             # Calculate Channel Total 95 peak
@@ -741,12 +835,19 @@ def scan_early_peak_channels(es, start_date, end_date):
                 
                 target_ch = sorted_ch[idx_ch]
                 if 8 <= target_ch["timestamp"].hour <= 17:
+                    shift_cost = target_ch["bandwidth"]
+                    up_speeds = speed_cache_for_day.get(channel_name)
+                    if up_speeds is None:
+                        up_speeds = get_total_up_speed_gb_at_times(es, current_date, channel_name, ["00:00", "19:00"])
+                        speed_cache_for_day[channel_name] = up_speeds
+                    reason = identify_shift_reason(shift_cost, up_speeds.get("00:00", 0), up_speeds.get("19:00", 0))
                     target_records.append({
                         "时间戳": target_ch["timestamp"].strftime("%Y-%m-%d %H:%M"),
                         "维度": "渠道汇总",
                         "运营商": "ALL",
                         "上行带宽": target_ch["bandwidth"],
-                        "渠道ID": channel_name
+                        "渠道ID": channel_name,
+                        "错峰原因": reason
                     })
                 
         current_date += timedelta(days=1)
@@ -754,7 +855,7 @@ def scan_early_peak_channels(es, start_date, end_date):
     # Save to Excel
     if target_records:
         df = pd.DataFrame(target_records)
-        df = df[["时间戳", "维度", "运营商", "上行带宽", "渠道ID"]]
+        df = df[["时间戳", "维度", "运营商", "上行带宽", "渠道ID", "错峰原因"]]
         output_file = f"8点-17点峰值汇总_综合_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx"
         try:
             df.to_excel(output_file, index=False)
@@ -900,6 +1001,7 @@ def main():
     program_name_summary_records = [] # 用于汇总所有渠道的节目名称峰值
     business_diff_records = [] # 用于汇总所有渠道的分业务错峰带宽差
     business_pivot_records = [] # 新增：汇总天维度各个渠道的业务带宽差值 (透视格式)
+    speed_snapshot_cache = {} # (date_str, channel) -> {"00:00": gb, "19:00": gb}
     
     for channel in srm_channels:
         print(f"\n>>> 正在处理渠道: {channel} <<<")
@@ -943,11 +1045,22 @@ def main():
                         "运营商": "ALL",
                         "渠道ID": channel,
                         "95峰值": peak_data["bandwidth"],
+                        "95峰值时间戳": f"{peak_data['date']} {peak_data.get('time_point', '')}" if peak_data.get("time_point") else ""
                     }
                     # 添加各个指定时间的数据
                     for name, info in peak_data.get("specified_times", {}).items():
                         row[f"{name}带宽"] = info["bandwidth"]
                         row[f"{name}差值"] = info["diff"]
+                    shift_cost = row.get("渠道在当天大盘95时间点差值", 0)
+                    reason = ""
+                    if shift_cost > 0:
+                        cache_key = (peak_data["date"], channel)
+                        speeds = speed_snapshot_cache.get(cache_key)
+                        if speeds is None:
+                            speeds = get_total_up_speed_gb_at_times(es, current_date, channel, ["00:00", "19:00"])
+                            speed_snapshot_cache[cache_key] = speeds
+                        reason = identify_shift_reason(shift_cost, speeds.get("00:00", 0), speeds.get("19:00", 0))
+                    row["错峰原因"] = reason
                     diff_summary_records.append(row)
 
                     tp_str = peak_data.get("time_point", "")
@@ -974,10 +1087,21 @@ def main():
                         "运营商": isp_res.get("isp", "unknown"),
                         "渠道ID": channel,
                         "95峰值": isp_res["bandwidth"],
+                        "95峰值时间戳": f"{isp_res['date']} {isp_res.get('time_point', '')}" if isp_res.get("time_point") else ""
                     }
                     for name, info in isp_res.get("specified_times", {}).items():
                         row[f"{name}带宽"] = info["bandwidth"]
                         row[f"{name}差值"] = info["diff"]
+                    shift_cost = row.get("渠道在当天大盘95时间点差值", 0)
+                    reason = ""
+                    if shift_cost > 0:
+                        cache_key = (isp_res["date"], channel)
+                        speeds = speed_snapshot_cache.get(cache_key)
+                        if speeds is None:
+                            speeds = get_total_up_speed_gb_at_times(es, current_date, channel, ["00:00", "19:00"])
+                            speed_snapshot_cache[cache_key] = speeds
+                        reason = identify_shift_reason(shift_cost, speeds.get("00:00", 0), speeds.get("19:00", 0))
+                    row["错峰原因"] = reason
                     diff_summary_records.append(row)
 
                     tp_str = isp_res.get("time_point", "")
@@ -1063,7 +1187,7 @@ def main():
                 if diff_summary_records:
                     df_diff = pd.DataFrame(diff_summary_records)
                     # 调整列顺序：将基础列放在前面，其他（业务带宽/差值）按字母顺序跟在后面
-                    base_cols = ["日期", "维度", "运营商", "渠道ID", "95峰值"]
+                    base_cols = ["日期", "维度", "运营商", "渠道ID", "95峰值", "95峰值时间戳", "错峰原因"]
                     other_cols = sorted([c for c in df_diff.columns if c not in base_cols])
                     df_diff = df_diff[base_cols + other_cols]
                     df_diff.to_excel(writer, sheet_name="渠道带宽差汇总", index=False)
