@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>出勤管理 - HRMS</title>
     <link rel="stylesheet" href="/ui/assets/styles.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="/ui/assets/app.js" defer></script>
   </head>
   <body>
@@ -50,6 +52,16 @@
             <button class="btn primary" id="btn_rule_save">保存规则</button>
           </div>
         </div>
+        <div class="row" style="margin-top:10px;">
+          <div style="align-self:flex-end;">
+            <button class="btn" id="btn_pick_point">地图选点</button>
+            <button class="btn" id="btn_clear_point">清除地点限制</button>
+          </div>
+          <div class="hint" style="align-self:center;">在地图上点击即可填充中心点坐标；半径用于限制可打卡范围</div>
+        </div>
+        <div id="map_wrap" style="margin-top:10px; display:none;">
+          <div id="map" style="height:360px; border:1px solid #e6e7ee; border-radius:10px;"></div>
+        </div>
         <div id="rule_msg" class="hint" style="margin-top:8px;"></div>
       </div>
 
@@ -90,6 +102,63 @@
     <script>
       document.addEventListener("DOMContentLoaded", async () => {
         if (!requireRole(["admin"])) return;
+        let map = null;
+        let marker = null;
+
+        const parseNum = (v) => {
+          const s = String(v || "").trim();
+          if (!s) return null;
+          const n = Number(s);
+          if (!Number.isFinite(n)) return null;
+          return n;
+        };
+
+        const ensureMap = () => {
+          const wrap = document.getElementById("map_wrap");
+          wrap.style.display = "";
+          if (map) return;
+          if (!window.L) {
+            const m = document.getElementById("rule_msg");
+            m.className = "error";
+            m.textContent = "地图组件加载失败，请检查网络是否可访问 unpkg.com";
+            return;
+          }
+          map = L.map("map").setView([39.9042, 116.4074], 12);
+          L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+            maxZoom: 19
+          }).addTo(map);
+          map.on("click", (e) => {
+            const lat = e.latlng.lat;
+            const lng = e.latlng.lng;
+            document.getElementById("r_lat").value = String(lat.toFixed(6));
+            document.getElementById("r_lng").value = String(lng.toFixed(6));
+            updateMarkerFromInputs(true);
+          });
+          updateMarkerFromInputs(false);
+        };
+
+        const updateMarkerFromInputs = (pan) => {
+          if (!map) return;
+          const lat = parseNum(document.getElementById("r_lat").value);
+          const lng = parseNum(document.getElementById("r_lng").value);
+          if (lat == null || lng == null) {
+            if (marker) {
+              map.removeLayer(marker);
+              marker = null;
+            }
+            return;
+          }
+          const ll = [lat, lng];
+          if (!marker) {
+            marker = L.marker(ll).addTo(map);
+          } else {
+            marker.setLatLng(ll);
+          }
+          if (pan) {
+            map.setView(ll, Math.max(map.getZoom(), 15));
+          }
+        };
+
         const showRule = (rule) => {
           document.getElementById("r_enabled").value = String(!!rule.enabled);
           document.getElementById("r_name").value = rule.name || "";
@@ -99,6 +168,7 @@
           document.getElementById("r_lng").value = rule.center_lng == null ? "" : String(rule.center_lng);
           document.getElementById("r_radius").value = rule.allowed_radius_m == null ? "" : String(rule.allowed_radius_m);
           document.getElementById("r_hint").value = rule.address_hint || "";
+          updateMarkerFromInputs(true);
         };
 
         const loadRule = async () => {
@@ -143,6 +213,18 @@
 
         document.getElementById("btn_rule_load").addEventListener("click", loadRule);
         document.getElementById("btn_rule_save").addEventListener("click", saveRule);
+        document.getElementById("btn_pick_point").addEventListener("click", () => {
+          ensureMap();
+          updateMarkerFromInputs(true);
+        });
+        document.getElementById("btn_clear_point").addEventListener("click", () => {
+          document.getElementById("r_lat").value = "";
+          document.getElementById("r_lng").value = "";
+          document.getElementById("r_radius").value = "";
+          updateMarkerFromInputs(false);
+        });
+        document.getElementById("r_lat").addEventListener("change", () => updateMarkerFromInputs(true));
+        document.getElementById("r_lng").addEventListener("change", () => updateMarkerFromInputs(true));
         await loadRule();
 
         document.getElementById("btn_sync").addEventListener("click", async () => {
