@@ -9,6 +9,14 @@
     "navigationBarBackgroundColor": "#ffffff",
     "navigationBarTextStyle": "black",
     "backgroundTextStyle": "light"
-  }
+  },
+  "permission": {
+    "scope.userLocation": {
+      "desc": "用于获取打卡地点并校验是否在规定范围内"
+    }
+  },
+  "requiredPrivateInfos": [
+    "getLocation",
+    "chooseLocation"
+  ]
 }
-

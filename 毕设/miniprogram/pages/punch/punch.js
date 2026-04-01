@@ -62,7 +62,12 @@ Page({
     const role = wx.getStorageSync("role");
     const userId = wx.getStorageSync("user_id");
     if (!token || role !== "employee") {
-      wx.redirectTo({ url: "/pages/login/login" });
+      wx.removeStorageSync("token");
+      wx.removeStorageSync("role");
+      wx.removeStorageSync("user_id");
+      if (this._navLock) return;
+      this._navLock = true;
+      wx.reLaunch({ url: "/pages/login/login?msg=" + encodeURIComponent("请使用员工账号登录") });
       return;
     }
     this.setData({ userId: userId || "" });
@@ -81,7 +86,9 @@ Page({
     wx.removeStorageSync("token");
     wx.removeStorageSync("role");
     wx.removeStorageSync("user_id");
-    wx.redirectTo({ url: "/pages/login/login" });
+    if (this._navLock) return;
+    this._navLock = true;
+    wx.reLaunch({ url: "/pages/login/login" });
   },
   toHistory() {
     wx.navigateTo({ url: "/pages/history/history" });
@@ -118,4 +125,3 @@ Page({
     }
   }
 });
-

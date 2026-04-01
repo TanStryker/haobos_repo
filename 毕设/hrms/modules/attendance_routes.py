@@ -117,6 +117,7 @@ def admin_sync_attendance(
 ):
     records = payload.records or []
     inserted = 0
+    touched: set[tuple[str, str]] = set()
     for r in records:
         row = {
             "id": str(uuid.uuid4()),
@@ -128,6 +129,11 @@ def admin_sync_attendance(
         }
         db.insert("attendance_records", row)
         inserted += 1
+        month = str(r.ts)[:7] if r.ts else ""
+        if len(month) == 7:
+            touched.add((r.employee_id, month))
+    for emp_id, month in touched:
+        _update_employee_attendance_days(db, emp_id, month)
     return {"ok": True, "inserted": inserted}
 
 
@@ -221,6 +227,9 @@ def employee_punch(
         "created_at": now_iso(),
     }
     db.insert("attendance_records", row)
+    month = ts_str[:7]
+    if len(month) == 7:
+        _update_employee_attendance_days(db, user.user_id, month)
     return {"ok": True, "item": row}
 
 
@@ -285,6 +294,9 @@ def admin_adjust_attendance(
         "adjusted_by": admin.user_id,
     }
     db.insert("attendance_records", row)
+    month = str(payload.ts)[:7] if payload.ts else ""
+    if len(month) == 7:
+        _update_employee_attendance_days(db, payload.employee_id, month)
     return {"ok": True, "action": "inserted"}
 
 
@@ -297,6 +309,19 @@ def _attendance_days(records: list[dict]) -> float:
         if len(ts) >= 10:
             days.add(ts[:10])
     return float(len(days))
+
+
+def _update_employee_attendance_days(db: JsonDB, employee_id: str, month: str) -> None:
+    records = db.find_many(
+        "attendance_records",
+        lambda r: r.get("employee_id") == employee_id and str(r.get("ts", "")).startswith(month),
+    )
+    days = _attendance_days(records)
+    def updater(row: dict) -> dict:
+        row["attendance_days"] = days
+        row["updated_at"] = now_iso()
+        return row
+    db.update_one("employees", lambda e: e.get("employee_id") == employee_id, updater)
 
 
 @router.get("/admin/attendance/stats")

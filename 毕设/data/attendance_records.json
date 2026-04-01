@@ -1,0 +1,26 @@
+[
+  {
+    "id": "85e61652-5cd7-4e5d-a62d-8633a1d45d3e",
+    "employee_id": "101",
+    "ts": "2026-04-01T18:08:16",
+    "status": "present",
+    "source": "wechat_miniprogram",
+    "address": "湖北省武汉市江夏区文化大道 江夏区机关行政办公楼(文化大道西)",
+    "lat": 30.37559,
+    "lng": 114.32168,
+    "rule_id": "current",
+    "created_at": "2026-04-01T10:08:16.691951+00:00"
+  },
+  {
+    "id": "ab2fdff8-4590-471b-888e-646040c95e15",
+    "employee_id": "101",
+    "ts": "2026-04-01T18:16:39",
+    "status": "present",
+    "source": "wechat_miniprogram",
+    "address": "湖北省武汉市江夏区文化大道 江夏区机关行政办公楼(文化大道西)",
+    "lat": 30.37559,
+    "lng": 114.32168,
+    "rule_id": "current",
+    "created_at": "2026-04-01T10:16:39.080153+00:00"
+  }
+]

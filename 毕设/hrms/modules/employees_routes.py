@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -52,6 +53,23 @@ def _employee_public(row: dict) -> dict:
         "updated_at": row.get("updated_at", ""),
     }
 
+def _calc_attendance_days_for_month(records: list[dict]) -> dict[str, float]:
+    grouped: dict[str, set[str]] = {}
+    for r in records:
+        if r.get("status") != "present":
+            continue
+        emp_id = str(r.get("employee_id", ""))
+        ts = str(r.get("ts", ""))
+        if len(ts) < 10:
+            continue
+        day = ts[:10]
+        s = grouped.get(emp_id)
+        if s is None:
+            s = set()
+            grouped[emp_id] = s
+        s.add(day)
+    return {k: float(len(v)) for k, v in grouped.items()}
+
 
 @router.get("/admin/employees")
 def admin_list_employees(
@@ -67,6 +85,20 @@ def admin_list_employees(
             for r in rows
             if q2 in str(r.get("employee_id", "")).lower() or q2 in str(r.get("name", "")).lower()
         ]
+    month = datetime.now().strftime("%Y-%m")
+    attendance_records = db.find_many("attendance_records", lambda r: str(r.get("ts", "")).startswith(month))
+    days_map = _calc_attendance_days_for_month(attendance_records)
+    for r in rows:
+        emp_id = str(r.get("employee_id", ""))
+        computed = days_map.get(emp_id)
+        if computed is None:
+            continue
+        r["attendance_days"] = computed
+        def updater(row: dict) -> dict:
+            row["attendance_days"] = computed
+            row["updated_at"] = now_iso()
+            return row
+        db.update_one("employees", lambda e: e.get("employee_id") == emp_id, updater)
     rows.sort(key=lambda r: str(r.get("employee_id", "")))
     return {"items": [_employee_public(r) for r in rows]}
 
@@ -206,6 +238,20 @@ def employee_me(user: Annotated[AuthUser, Depends(require_user)], db: Annotated[
     emp = db.find_one("employees", lambda e: e.get("employee_id") == user.user_id)
     if not emp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="员工信息不存在")
+    month = datetime.now().strftime("%Y-%m")
+    attendance_records = db.find_many(
+        "attendance_records",
+        lambda r: r.get("employee_id") == user.user_id and str(r.get("ts", "")).startswith(month),
+    )
+    days_map = _calc_attendance_days_for_month(attendance_records)
+    computed = days_map.get(user.user_id)
+    if computed is not None:
+        emp["attendance_days"] = computed
+        def updater(row: dict) -> dict:
+            row["attendance_days"] = computed
+            row["updated_at"] = now_iso()
+            return row
+        db.update_one("employees", lambda e: e.get("employee_id") == user.user_id, updater)
     return _employee_public(emp)
 
 
@@ -352,4 +398,3 @@ def admin_reject_change_request(
 
     db.update_one("employee_change_requests", lambda r: r.get("id") == request_id, updater)
     return {"ok": True}
-

@@ -11,7 +11,12 @@ Page({
     const token = wx.getStorageSync("token");
     const role = wx.getStorageSync("role");
     if (!token || role !== "employee") {
-      wx.redirectTo({ url: "/pages/login/login" });
+      wx.removeStorageSync("token");
+      wx.removeStorageSync("role");
+      wx.removeStorageSync("user_id");
+      if (this._navLock) return;
+      this._navLock = true;
+      wx.reLaunch({ url: "/pages/login/login?msg=" + encodeURIComponent("请先登录员工账号") });
       return;
     }
     await this.load();
@@ -28,4 +33,3 @@ Page({
     }
   }
 });
-

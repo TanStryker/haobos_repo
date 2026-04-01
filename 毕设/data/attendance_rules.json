@@ -1,0 +1,15 @@
+[
+  {
+    "id": "current",
+    "name": "test1",
+    "enabled": true,
+    "start_time": "00:00",
+    "end_time": "23:59",
+    "center_lat": null,
+    "center_lng": null,
+    "allowed_radius_m": null,
+    "address_hint": "",
+    "updated_at": "2026-04-01T09:58:37.478331+00:00",
+    "updated_by": "admin"
+  }
+]

@@ -1,0 +1,21 @@
+[
+  {
+    "id": "c71330f1-4dba-44de-9fcb-7467ef21db90",
+    "employee_id": "101",
+    "changed_by": "admin",
+    "changed_at": "2026-04-01T10:08:01.341829+00:00",
+    "action": "create",
+    "before": null,
+    "after": {
+      "employee_id": "101",
+      "name": "test",
+      "department": "人力资源",
+      "position": "HR",
+      "daily_salary": 130.0,
+      "attendance_days": 0.0,
+      "active": true,
+      "created_at": "2026-04-01T10:08:01.339760+00:00",
+      "updated_at": "2026-04-01T10:08:01.339773+00:00"
+    }
+  }
+]
