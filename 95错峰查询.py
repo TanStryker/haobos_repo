@@ -267,8 +267,10 @@ def get_total_up_speed_gb_at_times(es, day_date, channel, target_times):
 
     return result
 
-def identify_shift_reason(shift_cost, up_00_gb, up_19_gb):
-    if shift_cost > 0 and up_00_gb > up_19_gb and (up_00_gb - up_19_gb) > 10:
+def identify_shift_reason(shift_cost, up_00_gb, up_10_gb, up_19_gb):
+    diff = up_00_gb - up_19_gb
+    threshold = up_10_gb * 0.05
+    if shift_cost > 0 and up_00_gb > up_19_gb and diff > threshold:
         return "供应商晚高峰前下架"
     return ""
 
@@ -808,15 +810,25 @@ def scan_early_peak_channels(es, start_date, end_date):
                         shift_cost = target_point["bandwidth"]
                         up_speeds = speed_cache_for_day.get(channel_name)
                         if up_speeds is None:
-                            up_speeds = get_total_up_speed_gb_at_times(es, current_date, channel_name, ["00:00", "19:00"])
+                            up_speeds = get_total_up_speed_gb_at_times(es, current_date, channel_name, ["00:00", "10:00", "19:00"])
                             speed_cache_for_day[channel_name] = up_speeds
-                        reason = identify_shift_reason(shift_cost, up_speeds.get("00:00", 0), up_speeds.get("19:00", 0))
+                        up00 = up_speeds.get("00:00", 0)
+                        up10 = up_speeds.get("10:00", 0)
+                        up19 = up_speeds.get("19:00", 0)
+                        diff_speed = up00 - up19
+                        threshold_speed = up10 * 0.05
+                        reason = identify_shift_reason(shift_cost, up00, up10, up19)
                         target_records.append({
                             "时间戳": peak_time.strftime("%Y-%m-%d %H:%M"),
                             "维度": "运营商细分",
                             "运营商": isp_name,
                             "上行带宽": target_point["bandwidth"],
                             "渠道ID": channel_name,
+                            "00:00_total_up_speed(Gb)": up00,
+                            "10:00_total_up_speed(Gb)": up10,
+                            "19:00_total_up_speed(Gb)": up19,
+                            "00-19差值(Gb)": diff_speed,
+                            "阈值(10:00*5%)(Gb)": threshold_speed,
                             "错峰原因": reason
                         })
             
@@ -838,15 +850,25 @@ def scan_early_peak_channels(es, start_date, end_date):
                     shift_cost = target_ch["bandwidth"]
                     up_speeds = speed_cache_for_day.get(channel_name)
                     if up_speeds is None:
-                        up_speeds = get_total_up_speed_gb_at_times(es, current_date, channel_name, ["00:00", "19:00"])
+                        up_speeds = get_total_up_speed_gb_at_times(es, current_date, channel_name, ["00:00", "10:00", "19:00"])
                         speed_cache_for_day[channel_name] = up_speeds
-                    reason = identify_shift_reason(shift_cost, up_speeds.get("00:00", 0), up_speeds.get("19:00", 0))
+                    up00 = up_speeds.get("00:00", 0)
+                    up10 = up_speeds.get("10:00", 0)
+                    up19 = up_speeds.get("19:00", 0)
+                    diff_speed = up00 - up19
+                    threshold_speed = up10 * 0.05
+                    reason = identify_shift_reason(shift_cost, up00, up10, up19)
                     target_records.append({
                         "时间戳": target_ch["timestamp"].strftime("%Y-%m-%d %H:%M"),
                         "维度": "渠道汇总",
                         "运营商": "ALL",
                         "上行带宽": target_ch["bandwidth"],
                         "渠道ID": channel_name,
+                        "00:00_total_up_speed(Gb)": up00,
+                        "10:00_total_up_speed(Gb)": up10,
+                        "19:00_total_up_speed(Gb)": up19,
+                        "00-19差值(Gb)": diff_speed,
+                        "阈值(10:00*5%)(Gb)": threshold_speed,
                         "错峰原因": reason
                     })
                 
@@ -855,7 +877,7 @@ def scan_early_peak_channels(es, start_date, end_date):
     # Save to Excel
     if target_records:
         df = pd.DataFrame(target_records)
-        df = df[["时间戳", "维度", "运营商", "上行带宽", "渠道ID", "错峰原因"]]
+        df = df[["时间戳", "维度", "运营商", "上行带宽", "渠道ID", "00:00_total_up_speed(Gb)", "10:00_total_up_speed(Gb)", "19:00_total_up_speed(Gb)", "00-19差值(Gb)", "阈值(10:00*5%)(Gb)", "错峰原因"]]
         output_file = f"8点-17点峰值汇总_综合_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.xlsx"
         try:
             df.to_excel(output_file, index=False)
@@ -1001,7 +1023,7 @@ def main():
     program_name_summary_records = [] # 用于汇总所有渠道的节目名称峰值
     business_diff_records = [] # 用于汇总所有渠道的分业务错峰带宽差
     business_pivot_records = [] # 新增：汇总天维度各个渠道的业务带宽差值 (透视格式)
-    speed_snapshot_cache = {} # (date_str, channel) -> {"00:00": gb, "19:00": gb}
+    speed_snapshot_cache = {} # (date_str, channel) -> {"00:00": gb, "10:00": gb, "19:00": gb}
     
     for channel in srm_channels:
         print(f"\n>>> 正在处理渠道: {channel} <<<")
@@ -1057,9 +1079,17 @@ def main():
                         cache_key = (peak_data["date"], channel)
                         speeds = speed_snapshot_cache.get(cache_key)
                         if speeds is None:
-                            speeds = get_total_up_speed_gb_at_times(es, current_date, channel, ["00:00", "19:00"])
+                            speeds = get_total_up_speed_gb_at_times(es, current_date, channel, ["00:00", "10:00", "19:00"])
                             speed_snapshot_cache[cache_key] = speeds
-                        reason = identify_shift_reason(shift_cost, speeds.get("00:00", 0), speeds.get("19:00", 0))
+                        up00 = speeds.get("00:00", 0)
+                        up10 = speeds.get("10:00", 0)
+                        up19 = speeds.get("19:00", 0)
+                        row["00:00_total_up_speed(Gb)"] = up00
+                        row["10:00_total_up_speed(Gb)"] = up10
+                        row["19:00_total_up_speed(Gb)"] = up19
+                        row["00-19差值(Gb)"] = up00 - up19
+                        row["阈值(10:00*5%)(Gb)"] = up10 * 0.05
+                        reason = identify_shift_reason(shift_cost, up00, up10, up19)
                     row["错峰原因"] = reason
                     diff_summary_records.append(row)
 
@@ -1098,9 +1128,17 @@ def main():
                         cache_key = (isp_res["date"], channel)
                         speeds = speed_snapshot_cache.get(cache_key)
                         if speeds is None:
-                            speeds = get_total_up_speed_gb_at_times(es, current_date, channel, ["00:00", "19:00"])
+                            speeds = get_total_up_speed_gb_at_times(es, current_date, channel, ["00:00", "10:00", "19:00"])
                             speed_snapshot_cache[cache_key] = speeds
-                        reason = identify_shift_reason(shift_cost, speeds.get("00:00", 0), speeds.get("19:00", 0))
+                        up00 = speeds.get("00:00", 0)
+                        up10 = speeds.get("10:00", 0)
+                        up19 = speeds.get("19:00", 0)
+                        row["00:00_total_up_speed(Gb)"] = up00
+                        row["10:00_total_up_speed(Gb)"] = up10
+                        row["19:00_total_up_speed(Gb)"] = up19
+                        row["00-19差值(Gb)"] = up00 - up19
+                        row["阈值(10:00*5%)(Gb)"] = up10 * 0.05
+                        reason = identify_shift_reason(shift_cost, up00, up10, up19)
                     row["错峰原因"] = reason
                     diff_summary_records.append(row)
 
@@ -1187,7 +1225,13 @@ def main():
                 if diff_summary_records:
                     df_diff = pd.DataFrame(diff_summary_records)
                     # 调整列顺序：将基础列放在前面，其他（业务带宽/差值）按字母顺序跟在后面
-                    base_cols = ["日期", "维度", "运营商", "渠道ID", "95峰值", "95峰值时间戳", "错峰原因"]
+                    base_cols = ["日期", "维度", "运营商", "渠道ID", "95峰值", "95峰值时间戳", "00:00_total_up_speed(Gb)", "10:00_total_up_speed(Gb)", "19:00_total_up_speed(Gb)", "00-19差值(Gb)", "阈值(10:00*5%)(Gb)", "错峰原因"]
+                    for c in base_cols:
+                        if c not in df_diff.columns:
+                            if c in {"日期", "维度", "运营商", "渠道ID", "95峰值时间戳", "错峰原因"}:
+                                df_diff[c] = ""
+                            else:
+                                df_diff[c] = 0
                     other_cols = sorted([c for c in df_diff.columns if c not in base_cols])
                     df_diff = df_diff[base_cols + other_cols]
                     df_diff.to_excel(writer, sheet_name="渠道带宽差汇总", index=False)
