@@ -1,0 +1,21 @@
+<view class="card">
+  <view class="row" style="justify-content: space-between;">
+    <view class="hint">当前账号：{{userId}}</view>
+    <button size="mini" bindtap="onLogout">退出</button>
+  </view>
+  <view class="field">
+    <view class="label">当前规则</view>
+    <view class="hint" wx:if="{{!ruleLoaded}}">加载中...</view>
+    <view wx:if="{{ruleLoaded}}">
+      <view class="hint">启用：{{rule.enabled ? '是' : '否'}}</view>
+      <view class="hint">名称：{{rule.name}}</view>
+      <view class="hint">时间：{{rule.start_time}} - {{rule.end_time}}</view>
+      <view class="hint" wx:if="{{rule.address_hint}}">地点提示：{{rule.address_hint}}</view>
+      <view class="hint" wx:if="{{rule.allowed_radius_m}}">半径：{{rule.allowed_radius_m}}m</view>
+    </view>
+  </view>
+  <button class="btn" type="primary" bindtap="onChooseAndPunch" loading="{{loading}}">获取定位并打卡</button>
+  <button class="btn" bindtap="toHistory">查看最近5次</button>
+  <view class="hint {{msgType}}">{{msg}}</view>
+</view>
+

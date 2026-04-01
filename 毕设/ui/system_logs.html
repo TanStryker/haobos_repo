@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>系统-日志 - HRMS</title>
+    <link rel="stylesheet" href="/ui/assets/styles.css" />
+    <script src="/ui/assets/app.js" defer></script>
+  </head>
+  <body>
+    <header><div id="nav"></div></header>
+    <div class="container">
+      <div class="card">
+        <h2>操作日志</h2>
+        <div class="row">
+          <div><label>条数</label><input id="tail" type="number" value="200" /></div>
+          <div style="align-self:flex-end;"><button class="btn primary" id="btn_load">加载</button></div>
+        </div>
+        <pre id="data"></pre>
+      </div>
+    </div>
+    <script>
+      document.addEventListener("DOMContentLoaded", async () => {
+        if (!requireRole(["admin"])) return;
+        document.getElementById("btn_load").addEventListener("click", async () => {
+          const tail = Number(document.getElementById("tail").value || 200);
+          const data = await api(`/admin/logs/operation?tail=${encodeURIComponent(String(tail))}`);
+          document.getElementById("data").textContent = (data.items || []).join("\n");
+        });
+      });
+    </script>
+  </body>
+</html>
+

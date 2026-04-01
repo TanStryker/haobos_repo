@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>员工管理 - HRMS</title>
+    <link rel="stylesheet" href="/ui/assets/styles.css" />
+    <script src="/ui/assets/app.js" defer></script>
+  </head>
+  <body>
+    <header><div id="nav"></div></header>
+    <div class="container">
+      <div class="card">
+        <h2>员工列表</h2>
+        <div class="row">
+          <div>
+            <label>查询（工号/姓名）</label>
+            <input id="q" placeholder="输入关键字" />
+          </div>
+          <div style="align-self:flex-end;">
+            <button class="btn" id="btn_search">查询</button>
+            <button class="btn primary" id="btn_refresh">刷新</button>
+          </div>
+        </div>
+        <div id="msg" class="hint" style="margin-top:10px;"></div>
+        <div style="max-height:420px; overflow:auto; margin-top:10px;">
+          <table>
+            <thead>
+              <tr>
+                <th>工号</th><th>姓名</th><th>部门</th><th>职位</th><th>单日薪资</th><th>出勤日</th><th>状态</th><th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>新增员工</h2>
+        <div class="row">
+          <div><label>工号</label><input id="c_employee_id" /></div>
+          <div><label>姓名</label><input id="c_name" /></div>
+          <div><label>部门</label><input id="c_department" /></div>
+          <div><label>职位</label><input id="c_position" /></div>
+          <div><label>单日薪资</label><input id="c_daily_salary" type="number" step="0.01" /></div>
+          <div><label>出勤日</label><input id="c_attendance_days" type="number" step="0.5" value="0" /></div>
+          <div style="align-self:flex-end;"><button class="btn primary" id="btn_create">新增</button></div>
+        </div>
+        <div class="hint">员工账号（登录用）由系统管理模块创建，工号与账号建议一致。</div>
+      </div>
+    </div>
+
+    <script>
+      function actionBtn(label, onClick, cls="btn") {
+        const b = document.createElement("button");
+        b.className = cls;
+        b.type = "button";
+        b.textContent = label;
+        b.addEventListener("click", onClick);
+        return b;
+      }
+
+      function td(text) {
+        const d = document.createElement("td");
+        d.textContent = text == null ? "" : String(text);
+        return d;
+      }
+
+      async function loadEmployees(q = "") {
+        const msg = document.getElementById("msg");
+        msg.className = "hint";
+        msg.textContent = "加载中...";
+        try {
+          const url = q ? `/admin/employees?q=${encodeURIComponent(q)}` : "/admin/employees";
+          const data = await api(url);
+          const tbody = document.getElementById("tbody");
+          tbody.innerHTML = "";
+          for (const e of data.items || []) {
+            const tr = document.createElement("tr");
+            tr.appendChild(td(e.employee_id));
+            tr.appendChild(td(e.name));
+            tr.appendChild(td(e.department));
+            tr.appendChild(td(e.position));
+            tr.appendChild(td(e.daily_salary));
+            tr.appendChild(td(e.attendance_days));
+            tr.appendChild(td(e.active ? "在职" : "离职"));
+            const ops = document.createElement("td");
+            ops.appendChild(actionBtn("详情", () => window.location.href = `/ui/admin_employee_detail.html?employee_id=${encodeURIComponent(e.employee_id)}`));
+            ops.appendChild(actionBtn("编辑", async () => {
+              const name = prompt("姓名", e.name) ?? "";
+              const department = prompt("部门", e.department) ?? "";
+              const position = prompt("职位", e.position) ?? "";
+              const dailySalary = prompt("单日薪资", e.daily_salary) ?? "";
+              const attendanceDays = prompt("出勤日", e.attendance_days) ?? "";
+              const active = confirm("是否在职？(确认=在职，取消=离职)");
+              await api(`/admin/employees/${encodeURIComponent(e.employee_id)}`, {
+                method: "PUT",
+                body: JSON.stringify({
+                  name,
+                  department,
+                  position,
+                  daily_salary: Number(dailySalary),
+                  attendance_days: Number(attendanceDays),
+                  active
+                })
+              });
+              await loadEmployees(document.getElementById("q").value.trim());
+            }));
+            ops.appendChild(actionBtn("删除", async () => {
+              if (!confirm(`确认删除员工 ${e.employee_id} 吗？`)) return;
+              await api(`/admin/employees/${encodeURIComponent(e.employee_id)}?confirm=true`, { method: "DELETE" });
+              await loadEmployees(document.getElementById("q").value.trim());
+            }, "btn danger"));
+            tr.appendChild(ops);
+            tbody.appendChild(tr);
+          }
+          msg.className = "ok";
+          msg.textContent = `已加载 ${data.items ? data.items.length : 0} 条`;
+        } catch (e) {
+          msg.className = "error";
+          msg.textContent = e.message;
+        }
+      }
+
+      document.addEventListener("DOMContentLoaded", async () => {
+        if (!requireRole(["admin"])) return;
+        document.getElementById("btn_refresh").addEventListener("click", () => loadEmployees(""));
+        document.getElementById("btn_search").addEventListener("click", () => loadEmployees(document.getElementById("q").value.trim()));
+        document.getElementById("btn_create").addEventListener("click", async () => {
+          const payload = {
+            employee_id: document.getElementById("c_employee_id").value.trim(),
+            name: document.getElementById("c_name").value.trim(),
+            department: document.getElementById("c_department").value.trim(),
+            position: document.getElementById("c_position").value.trim(),
+            daily_salary: Number(document.getElementById("c_daily_salary").value),
+            attendance_days: Number(document.getElementById("c_attendance_days").value || 0),
+          };
+          try {
+            await api("/admin/employees", { method: "POST", body: JSON.stringify(payload) });
+            await loadEmployees("");
+            alert("新增成功");
+          } catch (e) {
+            alert(e.message);
+          }
+        });
+        await loadEmployees("");
+      });
+    </script>
+  </body>
+</html>
+

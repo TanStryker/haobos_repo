@@ -1,0 +1,54 @@
+page {
+  background: #f6f7fb;
+  color: #222;
+  font-size: 14px;
+}
+
+.card {
+  background: #fff;
+  margin: 12px;
+  padding: 12px;
+  border-radius: 10px;
+}
+
+.row {
+  display: flex;
+  flex-direction: row;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.field {
+  margin: 8px 0;
+}
+
+.label {
+  color: #555;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.input {
+  border: 1px solid #cfd3e6;
+  border-radius: 8px;
+  padding: 8px;
+  background: #fff;
+}
+
+.btn {
+  margin-top: 10px;
+}
+
+.hint {
+  color: #666;
+  font-size: 12px;
+}
+
+.error {
+  color: #b42318;
+}
+
+.ok {
+  color: #067647;
+}
+

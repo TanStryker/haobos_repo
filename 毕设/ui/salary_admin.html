@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>薪资管理 - HRMS</title>
+    <link rel="stylesheet" href="/ui/assets/styles.css" />
+    <script src="/ui/assets/app.js" defer></script>
+  </head>
+  <body>
+    <header><div id="nav"></div></header>
+    <div class="container">
+      <div class="card">
+        <h2>薪资核算触发</h2>
+        <div class="row">
+          <div><label>月份 (YYYY-MM)</label><input id="month" placeholder="2026-04" /></div>
+          <div><label>员工工号(可选)</label><input id="eid" /></div>
+          <div style="align-self:flex-end;"><button class="btn primary" id="btn_calc">核算</button></div>
+          <div style="align-self:flex-end;"><button class="btn" id="btn_list">查看明细</button></div>
+          <div style="align-self:flex-end;"><button class="btn" id="btn_export">导出CSV</button></div>
+        </div>
+        <pre id="data"></pre>
+      </div>
+
+      <div class="card">
+        <h2>薪资数据修改（单日薪资/出勤日）</h2>
+        <div class="row">
+          <div><label>月份 (YYYY-MM)</label><input id="a_month" placeholder="2026-04" /></div>
+          <div><label>员工工号</label><input id="a_eid" /></div>
+          <div><label>单日薪资(可选)</label><input id="a_daily" type="number" step="0.01" /></div>
+          <div><label>出勤日(可选)</label><input id="a_att" type="number" step="0.5" /></div>
+          <div style="align-self:flex-end;"><button class="btn primary" id="btn_adjust">修改并重算</button></div>
+        </div>
+      </div>
+    </div>
+    <script>
+      function monthVal() { return document.getElementById("month").value.trim(); }
+      document.addEventListener("DOMContentLoaded", async () => {
+        if (!requireRole(["admin"])) return;
+        document.getElementById("btn_calc").addEventListener("click", async () => {
+          const month = monthVal();
+          const eid = document.getElementById("eid").value.trim();
+          const params = new URLSearchParams();
+          params.set("month", month);
+          if (eid) params.set("employee_id", eid);
+          const data = await api(`/admin/salaries/calculate?${params.toString()}`, { method: "POST" });
+          document.getElementById("data").textContent = JSON.stringify(data, null, 2);
+        });
+        document.getElementById("btn_list").addEventListener("click", async () => {
+          const month = monthVal();
+          const data = await api(`/admin/salaries?month=${encodeURIComponent(month)}`);
+          document.getElementById("data").textContent = JSON.stringify(data, null, 2);
+        });
+        document.getElementById("btn_export").addEventListener("click", async () => {
+          const month = monthVal();
+          window.open(`/admin/salaries/export?month=${encodeURIComponent(month)}`, "_blank");
+        });
+        document.getElementById("btn_adjust").addEventListener("click", async () => {
+          const month = document.getElementById("a_month").value.trim();
+          const eid = document.getElementById("a_eid").value.trim();
+          const payload = {};
+          const daily = document.getElementById("a_daily").value;
+          const att = document.getElementById("a_att").value;
+          if (daily !== "") payload.daily_salary = Number(daily);
+          if (att !== "") payload.attendance_days = Number(att);
+          const data = await api(`/admin/salaries/${encodeURIComponent(eid)}/adjust?month=${encodeURIComponent(month)}`, { method: "POST", body: JSON.stringify(payload) });
+          alert("已修改并重算");
+          document.getElementById("data").textContent = JSON.stringify(data, null, 2);
+        });
+      });
+    </script>
+  </body>
+</html>
+

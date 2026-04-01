@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>系统-账号管理 - HRMS</title>
+    <link rel="stylesheet" href="/ui/assets/styles.css" />
+    <script src="/ui/assets/app.js" defer></script>
+  </head>
+  <body>
+    <header><div id="nav"></div></header>
+    <div class="container">
+      <div class="card">
+        <h2>用户账号管理</h2>
+        <button class="btn primary" id="btn_load">加载账号</button>
+        <div style="max-height:420px; overflow:auto; margin-top:10px;">
+          <table>
+            <thead><tr><th>账号</th><th>角色</th><th>启用</th><th>需改密</th><th>操作</th></tr></thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>创建账号</h2>
+        <div class="row">
+          <div><label>账号(建议=工号)</label><input id="c_uid" /></div>
+          <div><label>角色</label>
+            <select id="c_role"><option value="employee">employee</option><option value="admin">admin</option></select>
+          </div>
+          <div><label>初始密码</label><input id="c_pwd" type="password" /></div>
+          <div style="align-self:flex-end;"><button class="btn primary" id="btn_create">创建</button></div>
+        </div>
+      </div>
+    </div>
+    <script>
+      function btn(label, cls, onClick) {
+        const b = document.createElement("button");
+        b.className = cls;
+        b.type = "button";
+        b.textContent = label;
+        b.addEventListener("click", onClick);
+        return b;
+      }
+      async function load() {
+        const data = await api("/admin/users");
+        const tbody = document.getElementById("tbody");
+        tbody.innerHTML = "";
+        for (const u of data.items || []) {
+          const tr = document.createElement("tr");
+          for (const v of [u.user_id, u.role, u.active ? "是" : "否", u.must_change_password ? "是" : "否"]) {
+            const td = document.createElement("td");
+            td.textContent = v == null ? "" : String(v);
+            tr.appendChild(td);
+          }
+          const ops = document.createElement("td");
+          ops.appendChild(btn("重置密码", "btn", async () => {
+            const np = prompt("新密码(>=6)") || "";
+            if (np.length < 6) return;
+            await api(`/admin/users/${encodeURIComponent(u.user_id)}/reset-password`, { method: "POST", body: JSON.stringify({ new_password: np }) });
+            await load();
+          }));
+          if (u.user_id !== "admin") {
+            ops.appendChild(btn("删除", "btn danger", async () => {
+              if (!confirm(`确认删除账号 ${u.user_id}？`)) return;
+              await api(`/admin/users/${encodeURIComponent(u.user_id)}?confirm=true`, { method: "DELETE" });
+              await load();
+            }));
+          }
+          tr.appendChild(ops);
+          tbody.appendChild(tr);
+        }
+      }
+      document.addEventListener("DOMContentLoaded", async () => {
+        if (!requireRole(["admin"])) return;
+        document.getElementById("btn_load").addEventListener("click", load);
+        document.getElementById("btn_create").addEventListener("click", async () => {
+          await api("/admin/users", { method: "POST", body: JSON.stringify({
+            user_id: document.getElementById("c_uid").value.trim(),
+            role: document.getElementById("c_role").value,
+            password: document.getElementById("c_pwd").value
+          })});
+          alert("创建成功");
+          await load();
+        });
+        await load();
+      });
+    </script>
+  </body>
+</html>
+

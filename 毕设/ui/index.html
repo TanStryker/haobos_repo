@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>HRMS</title>
+    <link rel="stylesheet" href="/ui/assets/styles.css" />
+    <script src="/ui/assets/app.js" defer></script>
+  </head>
+  <body>
+    <header><div id="nav"></div></header>
+    <div class="container">
+      <div class="card" id="card_logged_out" style="display:none;">
+        <h2>人力资源管理系统</h2>
+        <div class="hint">请先登录。管理员和员工登录后会显示对应模块入口。</div>
+        <div style="margin-top: 12px;">
+          <a class="btn primary" href="/ui/login.html">去登录</a>
+        </div>
+      </div>
+
+      <div class="card" id="card_logged_in" style="display:none;">
+        <h2 id="welcome"></h2>
+        <div class="hint" id="now"></div>
+      </div>
+
+      <div class="card" id="card_dashboard" style="display:none;">
+        <h2>流程中心</h2>
+        <div id="dash_msg" class="hint"></div>
+
+        <div id="dash_admin" style="display:none;">
+          <h3>待处理流程</h3>
+          <div id="admin_pending"></div>
+        </div>
+
+        <div id="dash_employee" style="display:none;">
+          <h3>待进行流程</h3>
+          <div id="emp_pending" class="hint"></div>
+          <h3 style="margin-top:12px;">历史流程（最近5条）</h3>
+          <div id="emp_history" class="hint"></div>
+        </div>
+      </div>
+    </div>
+    <script>
+      function pad2(n) { return String(n).padStart(2, "0"); }
+      function fmtNow(d) {
+        const week = ["星期日","星期一","星期二","星期三","星期四","星期五","星期六"];
+        const s = `${d.getFullYear()}年${pad2(d.getMonth()+1)}月${pad2(d.getDate())}日 ${pad2(d.getHours())}:${pad2(d.getMinutes())} ${week[d.getDay()]}`;
+        return s;
+      }
+
+      async function resolveDisplayName() {
+        const role = localStorage.getItem("role") || "";
+        const userId = localStorage.getItem("user_id") || "";
+        if (role === "employee") {
+          try {
+            const emp = await api("/me/employee");
+            if (emp && emp.name) return emp.name;
+          } catch (_) {
+          }
+        }
+        return userId || "用户";
+      }
+
+      document.addEventListener("DOMContentLoaded", async () => {
+        const me = await ensureMe();
+        const outCard = document.getElementById("card_logged_out");
+        const inCard = document.getElementById("card_logged_in");
+        const dashCard = document.getElementById("card_dashboard");
+        if (!me) {
+          outCard.style.display = "";
+          inCard.style.display = "none";
+          dashCard.style.display = "none";
+          return;
+        }
+        outCard.style.display = "none";
+        inCard.style.display = "";
+        dashCard.style.display = "";
+
+        const name = await resolveDisplayName();
+        document.getElementById("welcome").textContent = `欢迎您（${name}）`;
+        const nowEl = document.getElementById("now");
+        const tick = () => { nowEl.textContent = `现在是（${fmtNow(new Date())}）`; };
+        tick();
+        setInterval(tick, 1000 * 10);
+
+        const dashMsg = document.getElementById("dash_msg");
+        dashMsg.className = "hint";
+        dashMsg.textContent = "加载流程中...";
+        try {
+          const summary = await api("/dashboard/summary");
+          dashMsg.className = "ok";
+          dashMsg.textContent = "";
+          if (summary.role === "admin") {
+            document.getElementById("dash_admin").style.display = "";
+            document.getElementById("dash_employee").style.display = "none";
+            const box = document.getElementById("admin_pending");
+            box.innerHTML = "";
+            const total = summary.total_pending || 0;
+            box.appendChild(document.createTextNode(`当前待处理总数：${total}`));
+            const ul = document.createElement("ul");
+            ul.style.marginTop = "8px";
+            for (const it of summary.pending_by_module || []) {
+              const li = document.createElement("li");
+              const a = document.createElement("a");
+              a.href = it.link || "/ui/index.html";
+              a.textContent = `${it.module} - ${it.flow}：${it.pending_count}`;
+              li.appendChild(a);
+              ul.appendChild(li);
+            }
+            box.appendChild(ul);
+          } else {
+            document.getElementById("dash_admin").style.display = "none";
+            document.getElementById("dash_employee").style.display = "";
+            const pending = summary.pending || [];
+            const history = summary.history_last5 || [];
+            const pBox = document.getElementById("emp_pending");
+            const hBox = document.getElementById("emp_history");
+            if (pending.length === 0) {
+              pBox.textContent = "当前没有待进行流程";
+            } else {
+              const ul = document.createElement("ul");
+              for (const it of pending) {
+                const li = document.createElement("li");
+                const a = document.createElement("a");
+                a.href = it.link || "/ui/index.html";
+                a.textContent = `${it.type}（${it.step}）- ${it.summary} - ${it.created_at || ""}`;
+                li.appendChild(a);
+                ul.appendChild(li);
+              }
+              pBox.innerHTML = "";
+              pBox.appendChild(ul);
+            }
+            if (history.length === 0) {
+              hBox.textContent = "暂无历史流程";
+            } else {
+              const ul = document.createElement("ul");
+              for (const it of history) {
+                const li = document.createElement("li");
+                const a = document.createElement("a");
+                a.href = it.link || "/ui/index.html";
+                const extra = it.result ? `（${it.result}）` : "";
+                a.textContent = `${it.type}（${it.step}）- ${it.summary} ${extra} - ${it.created_at || ""}`;
+                li.appendChild(a);
+                ul.appendChild(li);
+              }
+              hBox.innerHTML = "";
+              hBox.appendChild(ul);
+            }
+          }
+        } catch (e) {
+          dashMsg.className = "error";
+          dashMsg.textContent = e.message;
+        }
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>加班申请 - HRMS</title>
+    <link rel="stylesheet" href="/ui/assets/styles.css" />
+    <script src="/ui/assets/app.js" defer></script>
+  </head>
+  <body>
+    <header><div id="nav"></div></header>
+    <div class="container">
+      <div class="card">
+        <h2>提交加班申请</h2>
+        <div class="row">
+          <div><label>日期 (YYYY-MM-DD)</label><input id="date" placeholder="2026-04-01" /></div>
+          <div><label>加班天数</label><input id="days" type="number" step="0.5" /></div>
+          <div style="flex:1; min-width:260px;"><label>理由</label><input id="reason" style="min-width:260px; width:100%;" /></div>
+          <div style="align-self:flex-end;"><button class="btn primary" id="btn_submit">提交</button></div>
+        </div>
+        <div id="msg" class="hint" style="margin-top:10px;"></div>
+      </div>
+
+      <div class="card">
+        <h2>我的加班记录</h2>
+        <div style="max-height:420px; overflow:auto;">
+          <table>
+            <thead>
+              <tr><th>创建时间</th><th>日期</th><th>天数</th><th>理由</th><th>状态</th><th>驳回理由</th></tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <script>
+      async function load() {
+        const data = await api("/me/overtime");
+        const tbody = document.getElementById("tbody");
+        tbody.innerHTML = "";
+        for (const r of data.items || []) {
+          const tr = document.createElement("tr");
+          for (const v of [r.created_at, r.date, r.days, r.reason, r.status, r.rejected_reason]) {
+            const td = document.createElement("td");
+            td.textContent = v == null ? "" : String(v);
+            tr.appendChild(td);
+          }
+          tbody.appendChild(tr);
+        }
+      }
+      document.addEventListener("DOMContentLoaded", async () => {
+        if (!requireRole(["employee"])) return;
+        await load();
+        document.getElementById("btn_submit").addEventListener("click", async () => {
+          const msg = document.getElementById("msg");
+          msg.className = "hint";
+          msg.textContent = "";
+          try {
+            await api("/me/overtime", {
+              method: "POST",
+              body: JSON.stringify({
+                date: document.getElementById("date").value.trim(),
+                days: Number(document.getElementById("days").value),
+                reason: document.getElementById("reason").value.trim(),
+              })
+            });
+            msg.className = "ok";
+            msg.textContent = "提交成功";
+            await load();
+          } catch (e) {
+            msg.className = "error";
+            msg.textContent = e.message;
+          }
+        });
+      });
+    </script>
+  </body>
+</html>
+

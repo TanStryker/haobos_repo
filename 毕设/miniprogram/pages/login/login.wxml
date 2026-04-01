@@ -1,0 +1,13 @@
+<view class="card">
+  <view class="field">
+    <view class="label">工号/账号</view>
+    <input class="input" placeholder="请输入工号" value="{{userId}}" bindinput="onUserId" />
+  </view>
+  <view class="field">
+    <view class="label">密码</view>
+    <input class="input" placeholder="请输入密码" password value="{{password}}" bindinput="onPassword" />
+  </view>
+  <button class="btn" type="primary" bindtap="onLogin" loading="{{loading}}">登录</button>
+  <view class="hint {{msgType}}">{{msg}}</view>
+</view>
+

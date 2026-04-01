@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>出勤管理 - HRMS</title>
+    <link rel="stylesheet" href="/ui/assets/styles.css" />
+    <script src="/ui/assets/app.js" defer></script>
+  </head>
+  <body>
+    <header><div id="nav"></div></header>
+    <div class="container">
+      <div class="card">
+        <h2>出勤数据同步（占位）</h2>
+        <div class="row">
+          <div><label>开始日期</label><input id="sd" placeholder="2026-04-01" /></div>
+          <div><label>结束日期</label><input id="ed" placeholder="2026-04-30" /></div>
+        </div>
+        <div style="margin-top:10px;">
+          <label>records (JSON数组，可留空)</label>
+          <textarea id="records" placeholder='[{"employee_id":"1001","ts":"2026-04-01T09:00:00","status":"present"}]'></textarea>
+        </div>
+        <div style="margin-top:10px;">
+          <button class="btn primary" id="btn_sync">同步</button>
+          <span id="msg" class="hint"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>考勤规则设置</h2>
+        <div class="row">
+          <div>
+            <label>启用</label>
+            <select id="r_enabled">
+              <option value="true">启用</option>
+              <option value="false">停用</option>
+            </select>
+          </div>
+          <div><label>规则名称</label><input id="r_name" value="默认规则" /></div>
+          <div><label>打卡开始时间(HH:MM)</label><input id="r_start" value="09:00" /></div>
+          <div><label>打卡结束时间(HH:MM)</label><input id="r_end" value="10:00" /></div>
+        </div>
+        <div class="row" style="margin-top:10px;">
+          <div><label>中心纬度(可选)</label><input id="r_lat" /></div>
+          <div><label>中心经度(可选)</label><input id="r_lng" /></div>
+          <div><label>允许半径(米，可选)</label><input id="r_radius" type="number" /></div>
+          <div style="flex:1; min-width:260px;"><label>地点提示(可选)</label><input id="r_hint" style="min-width:260px; width:100%;" /></div>
+          <div style="align-self:flex-end;">
+            <button class="btn" id="btn_rule_load">加载规则</button>
+            <button class="btn primary" id="btn_rule_save">保存规则</button>
+          </div>
+        </div>
+        <div id="rule_msg" class="hint" style="margin-top:8px;"></div>
+      </div>
+
+      <div class="card">
+        <h2>打卡记录查看</h2>
+        <div class="row">
+          <div><label>员工工号(可选)</label><input id="eid" /></div>
+          <div><label>月份(可选)</label><input id="month" placeholder="2026-04" /></div>
+          <div style="align-self:flex-end;"><button class="btn primary" id="btn_load">查询</button></div>
+        </div>
+        <div style="max-height:420px; overflow:auto; margin-top:10px;">
+          <table>
+            <thead><tr><th>员工</th><th>时间</th><th>状态</th><th>来源</th></tr></thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>出勤数据调整</h2>
+        <div class="row">
+          <div><label>员工工号</label><input id="a_eid" /></div>
+          <div><label>时间</label><input id="a_ts" placeholder="2026-04-01T09:00:00" /></div>
+          <div><label>状态</label><input id="a_status" value="present" /></div>
+          <div style="align-self:flex-end;"><button class="btn primary" id="btn_adjust">调整</button></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>出勤统计</h2>
+        <div class="row">
+          <div><label>月份 (YYYY-MM)</label><input id="s_month" placeholder="2026-04" /></div>
+          <div style="align-self:flex-end;"><button class="btn primary" id="btn_stats">统计</button></div>
+        </div>
+        <pre id="stats"></pre>
+      </div>
+    </div>
+    <script>
+      document.addEventListener("DOMContentLoaded", async () => {
+        if (!requireRole(["admin"])) return;
+        const showRule = (rule) => {
+          document.getElementById("r_enabled").value = String(!!rule.enabled);
+          document.getElementById("r_name").value = rule.name || "";
+          document.getElementById("r_start").value = rule.start_time || "";
+          document.getElementById("r_end").value = rule.end_time || "";
+          document.getElementById("r_lat").value = rule.center_lat == null ? "" : String(rule.center_lat);
+          document.getElementById("r_lng").value = rule.center_lng == null ? "" : String(rule.center_lng);
+          document.getElementById("r_radius").value = rule.allowed_radius_m == null ? "" : String(rule.allowed_radius_m);
+          document.getElementById("r_hint").value = rule.address_hint || "";
+        };
+
+        const loadRule = async () => {
+          const m = document.getElementById("rule_msg");
+          m.className = "hint";
+          m.textContent = "加载中...";
+          try {
+            const rule = await api("/admin/attendance/rule");
+            showRule(rule);
+            m.className = "ok";
+            m.textContent = "加载成功";
+          } catch (e) {
+            m.className = "error";
+            m.textContent = e.message;
+          }
+        };
+
+        const saveRule = async () => {
+          const m = document.getElementById("rule_msg");
+          m.className = "hint";
+          m.textContent = "保存中...";
+          try {
+            const enabled = document.getElementById("r_enabled").value === "true";
+            const payload = {
+              enabled,
+              name: document.getElementById("r_name").value.trim() || "默认规则",
+              start_time: document.getElementById("r_start").value.trim(),
+              end_time: document.getElementById("r_end").value.trim(),
+              center_lat: document.getElementById("r_lat").value.trim() === "" ? null : Number(document.getElementById("r_lat").value),
+              center_lng: document.getElementById("r_lng").value.trim() === "" ? null : Number(document.getElementById("r_lng").value),
+              allowed_radius_m: document.getElementById("r_radius").value.trim() === "" ? null : Number(document.getElementById("r_radius").value),
+              address_hint: document.getElementById("r_hint").value.trim(),
+            };
+            await api("/admin/attendance/rule", { method: "POST", body: JSON.stringify(payload) });
+            m.className = "ok";
+            m.textContent = "保存成功";
+          } catch (e) {
+            m.className = "error";
+            m.textContent = e.message;
+          }
+        };
+
+        document.getElementById("btn_rule_load").addEventListener("click", loadRule);
+        document.getElementById("btn_rule_save").addEventListener("click", saveRule);
+        await loadRule();
+
+        document.getElementById("btn_sync").addEventListener("click", async () => {
+          const msg = document.getElementById("msg");
+          msg.className = "hint";
+          msg.textContent = "同步中...";
+          try {
+            const sd = document.getElementById("sd").value.trim();
+            const ed = document.getElementById("ed").value.trim();
+            const raw = document.getElementById("records").value.trim();
+            const records = raw ? JSON.parse(raw) : null;
+            const data = await api("/admin/attendance/sync", { method: "POST", body: JSON.stringify({ start_date: sd, end_date: ed, records }) });
+            msg.className = "ok";
+            msg.textContent = `同步完成 inserted=${data.inserted}`;
+          } catch (e) {
+            msg.className = "error";
+            msg.textContent = e.message;
+          }
+        });
+
+        document.getElementById("btn_load").addEventListener("click", async () => {
+          const eid = document.getElementById("eid").value.trim();
+          const month = document.getElementById("month").value.trim();
+          const params = new URLSearchParams();
+          if (eid) params.set("employee_id", eid);
+          if (month) params.set("month", month);
+          const data = await api(`/admin/attendance/records?${params.toString()}`);
+          const tbody = document.getElementById("tbody");
+          tbody.innerHTML = "";
+          for (const r of data.items || []) {
+            const tr = document.createElement("tr");
+            for (const v of [r.employee_id, r.ts, r.status, r.source]) {
+              const td = document.createElement("td");
+              td.textContent = v == null ? "" : String(v);
+              tr.appendChild(td);
+            }
+            tbody.appendChild(tr);
+          }
+        });
+
+        document.getElementById("btn_adjust").addEventListener("click", async () => {
+          await api("/admin/attendance/adjust", {
+            method: "POST",
+            body: JSON.stringify({
+              employee_id: document.getElementById("a_eid").value.trim(),
+              ts: document.getElementById("a_ts").value.trim(),
+              status: document.getElementById("a_status").value.trim(),
+            })
+          });
+          alert("已提交调整");
+        });
+
+        document.getElementById("btn_stats").addEventListener("click", async () => {
+          const month = document.getElementById("s_month").value.trim();
+          const data = await api(`/admin/attendance/stats?month=${encodeURIComponent(month)}`);
+          document.getElementById("stats").textContent = JSON.stringify(data, null, 2);
+        });
+      });
+    </script>
+  </body>
+</html>

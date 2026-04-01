@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>员工详情 - HRMS</title>
+    <link rel="stylesheet" href="/ui/assets/styles.css" />
+    <script src="/ui/assets/app.js" defer></script>
+  </head>
+  <body>
+    <header><div id="nav"></div></header>
+    <div class="container">
+      <div class="card">
+        <h2>员工详情</h2>
+        <div class="hint">employee_id：<span id="eid"></span></div>
+        <div id="msg" class="hint" style="margin-top:10px;"></div>
+      </div>
+      <div class="card"><h3>基础信息</h3><pre id="emp"></pre></div>
+      <div class="card"><h3>薪资记录</h3><pre id="salary"></pre></div>
+      <div class="card"><h3>加班记录</h3><pre id="overtime"></pre></div>
+      <div class="card"><h3>出勤记录</h3><pre id="attendance"></pre></div>
+      <div class="card"><h3>变更历史</h3><pre id="history"></pre></div>
+    </div>
+    <script>
+      document.addEventListener("DOMContentLoaded", async () => {
+        if (!requireRole(["admin"])) return;
+        const eid = qs("employee_id");
+        document.getElementById("eid").textContent = eid;
+        const msg = document.getElementById("msg");
+        try {
+          const data = await api(`/admin/employees/${encodeURIComponent(eid)}`);
+          msg.className = "ok";
+          msg.textContent = "加载成功";
+          document.getElementById("emp").textContent = JSON.stringify(data.employee, null, 2);
+          document.getElementById("salary").textContent = JSON.stringify(data.salary_records, null, 2);
+          document.getElementById("overtime").textContent = JSON.stringify(data.overtime_records, null, 2);
+          document.getElementById("attendance").textContent = JSON.stringify(data.attendance_records, null, 2);
+          document.getElementById("history").textContent = JSON.stringify(data.change_history, null, 2);
+        } catch (e) {
+          msg.className = "error";
+          msg.textContent = e.message;
+        }
+      });
+    </script>
+  </body>
+</html>
+

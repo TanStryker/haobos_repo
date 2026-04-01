@@ -1,0 +1,11 @@
+<view class="card">
+  <button class="btn" type="primary" bindtap="load" loading="{{loading}}">刷新</button>
+  <view class="hint {{msgType}}">{{msg}}</view>
+  <view wx:if="{{items.length === 0}}" class="hint" style="margin-top:10px;">暂无记录</view>
+  <view wx:for="{{items}}" wx:key="id" class="card">
+    <view class="hint">时间：{{item.ts}}</view>
+    <view class="hint">地点：{{item.address}}</view>
+    <view class="hint">来源：{{item.source}}</view>
+  </view>
+</view>
+

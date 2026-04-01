@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>我的出勤 - HRMS</title>
+    <link rel="stylesheet" href="/ui/assets/styles.css" />
+    <script src="/ui/assets/app.js" defer></script>
+  </head>
+  <body>
+    <header><div id="nav"></div></header>
+    <div class="container">
+      <div class="card">
+        <h2>出勤统计</h2>
+        <div class="row">
+          <div><label>月份 (YYYY-MM)</label><input id="month" placeholder="2026-04" /></div>
+          <div style="align-self:flex-end;"><button class="btn primary" id="btn_load">查询</button></div>
+        </div>
+        <pre id="stats"></pre>
+      </div>
+      <div class="card">
+        <h2>打卡记录</h2>
+        <div style="max-height:420px; overflow:auto;">
+          <table>
+            <thead><tr><th>时间</th><th>状态</th><th>来源</th></tr></thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <script>
+      async function load() {
+        const month = document.getElementById("month").value.trim();
+        const stats = await api(`/me/attendance/stats?month=${encodeURIComponent(month)}`);
+        document.getElementById("stats").textContent = JSON.stringify(stats, null, 2);
+        const rec = await api(`/me/attendance/records?month=${encodeURIComponent(month)}`);
+        const tbody = document.getElementById("tbody");
+        tbody.innerHTML = "";
+        for (const r of rec.items || []) {
+          const tr = document.createElement("tr");
+          for (const v of [r.ts, r.status, r.source]) {
+            const td = document.createElement("td");
+            td.textContent = v == null ? "" : String(v);
+            tr.appendChild(td);
+          }
+          tbody.appendChild(tr);
+        }
+      }
+      document.addEventListener("DOMContentLoaded", async () => {
+        if (!requireRole(["employee"])) return;
+        document.getElementById("btn_load").addEventListener("click", load);
+      });
+    </script>
+  </body>
+</html>
+

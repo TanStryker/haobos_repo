@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>修改申请审批 - HRMS</title>
+    <link rel="stylesheet" href="/ui/assets/styles.css" />
+    <script src="/ui/assets/app.js" defer></script>
+  </head>
+  <body>
+    <header><div id="nav"></div></header>
+    <div class="container">
+      <div class="card">
+        <h2>修改申请列表</h2>
+        <div class="row">
+          <div>
+            <label>状态过滤</label>
+            <select id="status">
+              <option value="">全部</option>
+              <option value="pending">待审批</option>
+              <option value="approved">通过</option>
+              <option value="rejected">驳回</option>
+            </select>
+          </div>
+          <div style="align-self:flex-end;">
+            <button class="btn primary" id="btn_load">加载</button>
+          </div>
+        </div>
+        <div id="msg" class="hint" style="margin-top:10px;"></div>
+        <div style="max-height:520px; overflow:auto; margin-top:10px;">
+          <table>
+            <thead>
+              <tr>
+                <th>创建时间</th><th>员工工号</th><th>字段</th><th>新值</th><th>理由</th><th>状态</th><th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <script>
+      function btn(label, cls, onClick) {
+        const b = document.createElement("button");
+        b.className = cls;
+        b.type = "button";
+        b.textContent = label;
+        b.addEventListener("click", onClick);
+        return b;
+      }
+      async function load() {
+        const msg = document.getElementById("msg");
+        msg.className = "hint";
+        msg.textContent = "加载中...";
+        try {
+          const statusVal = document.getElementById("status").value;
+          const url = statusVal ? `/admin/change-requests?status=${encodeURIComponent(statusVal)}` : "/admin/change-requests";
+          const data = await api(url);
+          const tbody = document.getElementById("tbody");
+          tbody.innerHTML = "";
+          for (const r of data.items || []) {
+            const tr = document.createElement("tr");
+            const cols = [r.created_at, r.employee_id, r.field, r.new_value, r.reason, r.status];
+            for (const v of cols) {
+              const td = document.createElement("td");
+              td.textContent = v == null ? "" : String(v);
+              tr.appendChild(td);
+            }
+            const ops = document.createElement("td");
+            if (r.status === "pending") {
+              ops.appendChild(btn("通过", "btn primary", async () => { await api(`/admin/change-requests/${r.id}/approve`, { method: "POST" }); await load(); }));
+              ops.appendChild(btn("驳回", "btn danger", async () => {
+                const reason = prompt("驳回理由") || "";
+                if (!reason.trim()) return;
+                await api(`/admin/change-requests/${r.id}/reject`, { method: "POST", body: JSON.stringify({ reason }) });
+                await load();
+              }));
+            } else {
+              ops.textContent = "-";
+            }
+            tr.appendChild(ops);
+            tbody.appendChild(tr);
+          }
+          msg.className = "ok";
+          msg.textContent = `已加载 ${data.items ? data.items.length : 0} 条`;
+        } catch (e) {
+          msg.className = "error";
+          msg.textContent = e.message;
+        }
+      }
+      document.addEventListener("DOMContentLoaded", async () => {
+        if (!requireRole(["admin"])) return;
+        document.getElementById("btn_load").addEventListener("click", load);
+        await load();
+      });
+    </script>
+  </body>
+</html>
+

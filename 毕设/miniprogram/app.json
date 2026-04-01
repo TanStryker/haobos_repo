@@ -1,0 +1,14 @@
+{
+  "pages": [
+    "pages/login/login",
+    "pages/punch/punch",
+    "pages/history/history"
+  ],
+  "window": {
+    "navigationBarTitleText": "HRMS 打卡",
+    "navigationBarBackgroundColor": "#ffffff",
+    "navigationBarTextStyle": "black",
+    "backgroundTextStyle": "light"
+  }
+}
+

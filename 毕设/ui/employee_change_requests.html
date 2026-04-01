@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>信息修改申请 - HRMS</title>
+    <link rel="stylesheet" href="/ui/assets/styles.css" />
+    <script src="/ui/assets/app.js" defer></script>
+  </head>
+  <body>
+    <header><div id="nav"></div></header>
+    <div class="container">
+      <div class="card">
+        <h2>提交修改申请</h2>
+        <div class="row">
+          <div><label>修改字段</label><input id="field" placeholder="例如 department / position / name" /></div>
+          <div><label>新值</label><input id="new_value" /></div>
+          <div style="flex:1; min-width:260px;"><label>理由</label><input id="reason" style="min-width:260px; width:100%;" /></div>
+          <div style="align-self:flex-end;"><button class="btn primary" id="btn_submit">提交</button></div>
+        </div>
+        <div id="msg" class="hint" style="margin-top:10px;"></div>
+      </div>
+
+      <div class="card">
+        <h2>我的申请记录</h2>
+        <div style="max-height:420px; overflow:auto;">
+          <table>
+            <thead>
+              <tr><th>创建时间</th><th>字段</th><th>新值</th><th>状态</th><th>审批人</th><th>驳回理由</th></tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <script>
+      async function load() {
+        const data = await api("/me/change-requests");
+        const tbody = document.getElementById("tbody");
+        tbody.innerHTML = "";
+        for (const r of data.items || []) {
+          const tr = document.createElement("tr");
+          for (const v of [r.created_at, r.field, r.new_value, r.status, r.approved_by, r.rejected_reason]) {
+            const td = document.createElement("td");
+            td.textContent = v == null ? "" : String(v);
+            tr.appendChild(td);
+          }
+          tbody.appendChild(tr);
+        }
+      }
+      document.addEventListener("DOMContentLoaded", async () => {
+        if (!requireRole(["employee"])) return;
+        await load();
+        document.getElementById("btn_submit").addEventListener("click", async () => {
+          const msg = document.getElementById("msg");
+          msg.className = "hint";
+          msg.textContent = "";
+          try {
+            await api("/me/change-requests", {
+              method: "POST",
+              body: JSON.stringify({
+                field: document.getElementById("field").value.trim(),
+                new_value: document.getElementById("new_value").value.trim(),
+                reason: document.getElementById("reason").value.trim(),
+              })
+            });
+            msg.className = "ok";
+            msg.textContent = "提交成功";
+            await load();
+          } catch (e) {
+            msg.className = "error";
+            msg.textContent = e.message;
+          }
+        });
+      });
+    </script>
+  </body>
+</html>
+

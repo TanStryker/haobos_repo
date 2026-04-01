@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>我的薪资 - HRMS</title>
+    <link rel="stylesheet" href="/ui/assets/styles.css" />
+    <script src="/ui/assets/app.js" defer></script>
+  </head>
+  <body>
+    <header><div id="nav"></div></header>
+    <div class="container">
+      <div class="card">
+        <h2>本月薪资查询</h2>
+        <div class="row">
+          <div><label>月份 (YYYY-MM)</label><input id="month" placeholder="2026-04" /></div>
+          <div style="align-self:flex-end;"><button class="btn primary" id="btn_load">查询</button></div>
+        </div>
+        <pre id="data"></pre>
+      </div>
+      <div class="card">
+        <h2>历史薪资</h2>
+        <button class="btn primary" id="btn_hist">加载</button>
+        <pre id="hist"></pre>
+      </div>
+    </div>
+    <script>
+      document.addEventListener("DOMContentLoaded", async () => {
+        if (!requireRole(["employee"])) return;
+        document.getElementById("btn_load").addEventListener("click", async () => {
+          const month = document.getElementById("month").value.trim();
+          const data = await api(`/me/salary?month=${encodeURIComponent(month)}`);
+          document.getElementById("data").textContent = JSON.stringify(data, null, 2);
+        });
+        document.getElementById("btn_hist").addEventListener("click", async () => {
+          const data = await api("/me/salary/history");
+          document.getElementById("hist").textContent = JSON.stringify(data, null, 2);
+        });
+      });
+    </script>
+  </body>
+</html>
+

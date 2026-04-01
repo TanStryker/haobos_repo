@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>登录 - HRMS</title>
+    <link rel="stylesheet" href="/ui/assets/styles.css" />
+    <script src="/ui/assets/app.js" defer></script>
+  </head>
+  <body>
+    <header><div id="nav"></div></header>
+    <div class="container">
+      <div class="card">
+        <h2>登录</h2>
+        <div class="row">
+          <div>
+            <label>工号/账号</label>
+            <input id="user_id" placeholder="例如：admin 或 员工工号" />
+          </div>
+          <div>
+            <label>密码</label>
+            <input id="password" type="password" placeholder="请输入密码" />
+          </div>
+          <div style="align-self:flex-end;">
+            <button class="btn primary" id="btn_login">登录</button>
+          </div>
+        </div>
+        <div id="msg" class="hint" style="margin-top:10px;"></div>
+        <div class="hint" style="margin-top:10px;">默认管理员：admin / admin123</div>
+      </div>
+    </div>
+    <script>
+      document.addEventListener("DOMContentLoaded", () => {
+        const msg = document.getElementById("msg");
+        const btn = document.getElementById("btn_login");
+        btn.addEventListener("click", async () => {
+          msg.className = "hint";
+          msg.textContent = "";
+          try {
+            const userId = document.getElementById("user_id").value.trim();
+            const password = document.getElementById("password").value;
+            const data = await api("/auth/login", { method: "POST", body: JSON.stringify({ user_id: userId, password }) });
+            setAuth(data.token, data.user_id, data.role);
+            msg.className = "ok";
+            msg.textContent = "登录成功";
+            window.location.href = "/ui/index.html";
+          } catch (e) {
+            msg.className = "error";
+            msg.textContent = e.message;
+          }
+        });
+      });
+    </script>
+  </body>
+</html>
+
