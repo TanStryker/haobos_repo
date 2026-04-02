@@ -48,11 +48,24 @@ function validatePunch(rule, dt, lat, lng) {
   return { ok: true, reason: "" };
 }
 
+function validatePunchAny(rules, dt, lat, lng) {
+  if (!Array.isArray(rules) || rules.length === 0) return { ok: false, reason: "未配置可用打卡规则" };
+  const reasons = [];
+  for (const r of rules) {
+    const v = validatePunch(r, dt, lat, lng);
+    if (v.ok) return { ok: true, reason: "" };
+    if (v.reason && !reasons.includes(v.reason)) reasons.push(v.reason);
+  }
+  if (reasons.length === 0) return { ok: false, reason: "不符合任何已配置规则" };
+  return { ok: false, reason: "不符合任何已配置规则：" + reasons.join("；") };
+}
+
 Page({
   data: {
     userId: "",
     ruleLoaded: false,
-    rule: {},
+    workType: "",
+    rules: [],
     loading: false,
     msg: "",
     msgType: "hint"
@@ -71,15 +84,15 @@ Page({
       return;
     }
     this.setData({ userId: userId || "" });
-    await this.loadRule();
+    await this.loadRules();
   },
-  async loadRule() {
+  async loadRules() {
     this.setData({ ruleLoaded: false });
     try {
-      const rule = await request("/attendance/rule");
-      this.setData({ ruleLoaded: true, rule });
+      const data = await request("/attendance/rules");
+      this.setData({ ruleLoaded: true, workType: data.work_type || "", rules: data.rules || [] });
     } catch (e) {
-      this.setData({ ruleLoaded: true, rule: {}, msg: e.message, msgType: "error" });
+      this.setData({ ruleLoaded: true, workType: "", rules: [], msg: e.message, msgType: "error" });
     }
   },
   onLogout() {
@@ -107,7 +120,7 @@ Page({
       const lng = loc.longitude;
       const ts = nowIsoLocal();
       const dt = new Date();
-      const v = validatePunch(this.data.rule, dt, lat, lng);
+      const v = validatePunchAny(this.data.rules, dt, lat, lng);
       if (!v.ok) {
         this.setData({ msg: `无效打卡：${v.reason}`, msgType: "error" });
         return;

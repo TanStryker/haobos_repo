@@ -17,5 +17,35 @@
       "created_at": "2026-04-01T10:08:01.339760+00:00",
       "updated_at": "2026-04-01T10:08:01.339773+00:00"
     }
+  },
+  {
+    "id": "b72c4804-5e39-4172-b1b4-0744c00f5fec",
+    "employee_id": "101",
+    "changed_by": "admin",
+    "changed_at": "2026-04-02T09:51:57.314420+00:00",
+    "action": "approve_request",
+    "before": {
+      "employee_id": "101",
+      "name": "test",
+      "department": "人力资源",
+      "position": "HR",
+      "daily_salary": 130.0,
+      "attendance_days": 1.0,
+      "active": true,
+      "created_at": "2026-04-01T10:08:01.339760+00:00",
+      "updated_at": "2026-04-02T09:51:50.932756+00:00"
+    },
+    "after": {
+      "employee_id": "101",
+      "name": "S1",
+      "department": "人力资源",
+      "position": "HR",
+      "daily_salary": 130.0,
+      "attendance_days": 1.0,
+      "active": true,
+      "created_at": "2026-04-01T10:08:01.339760+00:00",
+      "updated_at": "2026-04-02T09:51:57.311382+00:00"
+    },
+    "request_id": "6b0ce7d5-2161-4976-bcf5-228169a1fb02"
   }
 ]

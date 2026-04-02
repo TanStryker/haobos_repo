@@ -27,7 +27,7 @@
           <table>
             <thead>
               <tr>
-                <th>工号</th><th>姓名</th><th>部门</th><th>职位</th><th>单日薪资</th><th>出勤日</th><th>状态</th><th>操作</th>
+                <th>工号</th><th>姓名</th><th>部门</th><th>职位</th><th>人员类型</th><th>单日薪资</th><th>出勤日</th><th>状态</th><th>操作</th>
               </tr>
             </thead>
             <tbody id="tbody"></tbody>
@@ -42,6 +42,13 @@
           <div><label>姓名</label><input id="c_name" /></div>
           <div><label>部门</label><input id="c_department" /></div>
           <div><label>职位</label><input id="c_position" /></div>
+          <div>
+            <label>人员类型</label>
+            <select id="c_work_type">
+              <option value="onsite">驻场</option>
+              <option value="offsite">外派</option>
+            </select>
+          </div>
           <div><label>单日薪资</label><input id="c_daily_salary" type="number" step="0.01" /></div>
           <div><label>出勤日</label><input id="c_attendance_days" type="number" step="0.5" value="0" /></div>
           <div style="align-self:flex-end;"><button class="btn primary" id="btn_create">新增</button></div>
@@ -81,6 +88,7 @@
             tr.appendChild(td(e.name));
             tr.appendChild(td(e.department));
             tr.appendChild(td(e.position));
+            tr.appendChild(td(e.work_type === "offsite" ? "外派" : "驻场"));
             tr.appendChild(td(e.daily_salary));
             tr.appendChild(td(e.attendance_days));
             tr.appendChild(td(e.active ? "在职" : "离职"));
@@ -90,6 +98,7 @@
               const name = prompt("姓名", e.name) ?? "";
               const department = prompt("部门", e.department) ?? "";
               const position = prompt("职位", e.position) ?? "";
+              const workType = prompt("人员类型(onsite=驻场, offsite=外派)", e.work_type || "onsite") ?? "onsite";
               const dailySalary = prompt("单日薪资", e.daily_salary) ?? "";
               const attendanceDays = prompt("出勤日", e.attendance_days) ?? "";
               const active = confirm("是否在职？(确认=在职，取消=离职)");
@@ -99,6 +108,7 @@
                   name,
                   department,
                   position,
+                  work_type: workType,
                   daily_salary: Number(dailySalary),
                   attendance_days: Number(attendanceDays),
                   active
@@ -132,6 +142,7 @@
             name: document.getElementById("c_name").value.trim(),
             department: document.getElementById("c_department").value.trim(),
             position: document.getElementById("c_position").value.trim(),
+            work_type: document.getElementById("c_work_type").value,
             daily_salary: Number(document.getElementById("c_daily_salary").value),
             attendance_days: Number(document.getElementById("c_attendance_days").value || 0),
           };
@@ -148,4 +159,3 @@
     </script>
   </body>
 </html>
-

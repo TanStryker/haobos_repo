@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>出勤管理 - HRMS</title>
     <link rel="stylesheet" href="/ui/assets/styles.css" />
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="/ui/assets/vendor/leaflet/leaflet.css" />
+    <script src="/ui/assets/vendor/leaflet/leaflet.js"></script>
     <script src="/ui/assets/app.js" defer></script>
   </head>
   <body>
@@ -32,12 +32,31 @@
         <h2>考勤规则设置</h2>
         <div class="row">
           <div>
+            <label>规则选择</label>
+            <select id="r_rule_select" style="min-width:320px;"></select>
+          </div>
+          <div style="align-self:flex-end;">
+            <button class="btn" id="btn_rule_refresh">刷新列表</button>
+            <button class="btn" id="btn_rule_new">新建规则</button>
+            <button class="btn danger" id="btn_rule_delete">删除规则</button>
+          </div>
+        </div>
+        <div class="row" style="margin-top:10px;">
+          <div>
             <label>启用</label>
             <select id="r_enabled">
               <option value="true">启用</option>
               <option value="false">停用</option>
             </select>
           </div>
+          <div>
+            <label>适用人员</label>
+            <select id="r_work_type">
+              <option value="onsite">驻场</option>
+              <option value="offsite">外派</option>
+            </select>
+          </div>
+          <div><label>优先级(越小越优先)</label><input id="r_priority" type="number" value="100" /></div>
           <div><label>规则名称</label><input id="r_name" value="默认规则" /></div>
           <div><label>打卡开始时间(HH:MM)</label><input id="r_start" value="09:00" /></div>
           <div><label>打卡结束时间(HH:MM)</label><input id="r_end" value="10:00" /></div>
@@ -48,7 +67,6 @@
           <div><label>允许半径(米，可选)</label><input id="r_radius" type="number" /></div>
           <div style="flex:1; min-width:260px;"><label>地点提示(可选)</label><input id="r_hint" style="min-width:260px; width:100%;" /></div>
           <div style="align-self:flex-end;">
-            <button class="btn" id="btn_rule_load">加载规则</button>
             <button class="btn primary" id="btn_rule_save">保存规则</button>
           </div>
         </div>
@@ -104,6 +122,8 @@
         if (!requireRole(["admin"])) return;
         let map = null;
         let marker = null;
+        let currentRuleId = null;
+        let ruleItems = [];
 
         const parseNum = (v) => {
           const s = String(v || "").trim();
@@ -120,13 +140,74 @@
           if (!window.L) {
             const m = document.getElementById("rule_msg");
             m.className = "error";
-            m.textContent = "地图组件加载失败，请检查网络是否可访问 unpkg.com";
+            m.textContent = "地图组件加载失败，请检查 /ui/assets/vendor/leaflet/ 是否存在";
             return;
           }
           map = L.map("map").setView([39.9042, 116.4074], 12);
-          L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-            maxZoom: 19
-          }).addTo(map);
+
+          const offlineTiles = L.tileLayer("/ui/tiles/{z}/{x}/{y}.png", {
+            maxZoom: 19,
+            attribution: "离线瓦片"
+          });
+          const gaodeStandardTiles = L.tileLayer("https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=7&x={x}&y={y}&z={z}", {
+            subdomains: ["1", "2", "3", "4"],
+            maxZoom: 19,
+            attribution: "高德地图"
+          });
+          const gaodeSatelliteTiles = L.tileLayer("https://webst0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=6&x={x}&y={y}&z={z}", {
+            subdomains: ["1", "2", "3", "4"],
+            maxZoom: 19,
+            attribution: "高德卫星"
+          });
+          const gaodeLabelTiles = L.tileLayer("https://webst0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}", {
+            subdomains: ["1", "2", "3", "4"],
+            maxZoom: 19,
+            attribution: "高德注记"
+          });
+
+          const baseLayers = {
+            "高德卫星（推荐）": gaodeSatelliteTiles,
+            "高德标准": gaodeStandardTiles,
+            "离线瓦片": offlineTiles
+          };
+          const overlayLayers = {
+            "路网注记": gaodeLabelTiles
+          };
+
+          const ruleMsg = document.getElementById("rule_msg");
+          const probeOffline = async () => {
+            try {
+              const r = await fetch("/ui/tiles/12/3371/1551.png", { method: "HEAD", cache: "no-store" });
+              return r.ok;
+            } catch (_) {
+              return false;
+            }
+          };
+
+          const initLayers = async () => {
+            const hasOffline = await probeOffline();
+            const defaultLayer = hasOffline ? offlineTiles : gaodeSatelliteTiles;
+            defaultLayer.addTo(map);
+            if (!hasOffline) {
+              gaodeLabelTiles.addTo(map);
+            }
+            L.control.layers(baseLayers, overlayLayers, { collapsed: true }).addTo(map);
+            if (!hasOffline) {
+              ruleMsg.className = "hint";
+              ruleMsg.textContent = "未检测到离线瓦片（/ui/tiles），已使用高德卫星底图；如需离线，请将瓦片放到 毕设/ui/tiles/{z}/{x}/{y}.png";
+            }
+          };
+
+          const showTileErrorHint = (msg) => {
+            ruleMsg.className = "error";
+            ruleMsg.textContent = msg;
+          };
+          offlineTiles.on("tileerror", () => showTileErrorHint("离线瓦片不存在或路径不对：请将瓦片放到 毕设/ui/tiles/{z}/{x}/{y}.png"));
+          gaodeStandardTiles.on("tileerror", () => showTileErrorHint("高德在线瓦片加载失败：请检查网络/代理/防火墙，或改用离线瓦片"));
+          gaodeSatelliteTiles.on("tileerror", () => showTileErrorHint("高德卫星瓦片加载失败：请检查网络/代理/防火墙，或改用离线瓦片"));
+          gaodeLabelTiles.on("tileerror", () => showTileErrorHint("高德注记瓦片加载失败：请检查网络/代理/防火墙，或改用离线瓦片"));
+          initLayers();
+
           map.on("click", (e) => {
             const lat = e.latlng.lat;
             const lng = e.latlng.lng;
@@ -150,7 +231,7 @@
           }
           const ll = [lat, lng];
           if (!marker) {
-            marker = L.marker(ll).addTo(map);
+            marker = L.circleMarker(ll, { radius: 8, color: "#1f3b8a", fillColor: "#1f3b8a", fillOpacity: 0.35, weight: 2 }).addTo(map);
           } else {
             marker.setLatLng(ll);
           }
@@ -159,25 +240,64 @@
           }
         };
 
-        const showRule = (rule) => {
-          document.getElementById("r_enabled").value = String(!!rule.enabled);
-          document.getElementById("r_name").value = rule.name || "";
-          document.getElementById("r_start").value = rule.start_time || "";
-          document.getElementById("r_end").value = rule.end_time || "";
-          document.getElementById("r_lat").value = rule.center_lat == null ? "" : String(rule.center_lat);
-          document.getElementById("r_lng").value = rule.center_lng == null ? "" : String(rule.center_lng);
-          document.getElementById("r_radius").value = rule.allowed_radius_m == null ? "" : String(rule.allowed_radius_m);
-          document.getElementById("r_hint").value = rule.address_hint || "";
+        const workTypeLabel = (v) => (v === "offsite" ? "外派" : "驻场");
+        const setFormRule = (rule) => {
+          currentRuleId = rule && rule.id ? rule.id : null;
+          document.getElementById("r_enabled").value = String(!!(rule && rule.enabled));
+          document.getElementById("r_work_type").value = (rule && rule.work_type) || "onsite";
+          document.getElementById("r_priority").value = rule && rule.priority != null ? String(rule.priority) : "100";
+          document.getElementById("r_name").value = (rule && rule.name) || "";
+          document.getElementById("r_start").value = (rule && rule.start_time) || "";
+          document.getElementById("r_end").value = (rule && rule.end_time) || "";
+          document.getElementById("r_lat").value = rule && rule.center_lat == null ? "" : String(rule.center_lat);
+          document.getElementById("r_lng").value = rule && rule.center_lng == null ? "" : String(rule.center_lng);
+          document.getElementById("r_radius").value = rule && rule.allowed_radius_m == null ? "" : String(rule.allowed_radius_m);
+          document.getElementById("r_hint").value = (rule && rule.address_hint) || "";
           updateMarkerFromInputs(true);
         };
 
-        const loadRule = async () => {
+        const refreshSelect = () => {
+          const sel = document.getElementById("r_rule_select");
+          sel.innerHTML = "";
+          for (const r of ruleItems) {
+            const opt = document.createElement("option");
+            opt.value = r.id;
+            const enabledText = r.enabled ? "启用" : "停用";
+            opt.textContent = `${workTypeLabel(r.work_type)} | P${r.priority ?? 100} | ${enabledText} | ${r.name || ""}`;
+            sel.appendChild(opt);
+          }
+          if (ruleItems.length === 0) {
+            const opt = document.createElement("option");
+            opt.value = "";
+            opt.textContent = "暂无规则，请新建";
+            sel.appendChild(opt);
+          }
+        };
+
+        const loadRules = async (keepId) => {
           const m = document.getElementById("rule_msg");
           m.className = "hint";
           m.textContent = "加载中...";
           try {
-            const rule = await api("/admin/attendance/rule");
-            showRule(rule);
+            const data = await api("/admin/attendance/rules");
+            ruleItems = data.items || [];
+            refreshSelect();
+            const sel = document.getElementById("r_rule_select");
+            let targetId = keepId || currentRuleId;
+            if (targetId && ruleItems.some(r => r.id === targetId)) {
+              sel.value = targetId;
+            } else if (ruleItems.length > 0) {
+              sel.value = ruleItems[0].id;
+              targetId = ruleItems[0].id;
+            } else {
+              targetId = null;
+            }
+            const selected = ruleItems.find(r => r.id === targetId) || null;
+            if (selected) {
+              setFormRule(selected);
+            } else {
+              setFormRule({ enabled: false, work_type: "onsite", priority: 100, name: "默认规则", start_time: "09:00", end_time: "10:00" });
+            }
             m.className = "ok";
             m.textContent = "加载成功";
           } catch (e) {
@@ -192,8 +312,12 @@
           m.textContent = "保存中...";
           try {
             const enabled = document.getElementById("r_enabled").value === "true";
+            const work_type = document.getElementById("r_work_type").value;
+            const priority = Number(document.getElementById("r_priority").value || 100);
             const payload = {
               enabled,
+              work_type,
+              priority,
               name: document.getElementById("r_name").value.trim() || "默认规则",
               start_time: document.getElementById("r_start").value.trim(),
               end_time: document.getElementById("r_end").value.trim(),
@@ -202,17 +326,47 @@
               allowed_radius_m: document.getElementById("r_radius").value.trim() === "" ? null : Number(document.getElementById("r_radius").value),
               address_hint: document.getElementById("r_hint").value.trim(),
             };
-            await api("/admin/attendance/rule", { method: "POST", body: JSON.stringify(payload) });
+            if (currentRuleId) {
+              await api(`/admin/attendance/rules/${encodeURIComponent(currentRuleId)}`, { method: "PUT", body: JSON.stringify(payload) });
+            } else {
+              const created = await api("/admin/attendance/rules", { method: "POST", body: JSON.stringify(payload) });
+              currentRuleId = created.id;
+            }
             m.className = "ok";
             m.textContent = "保存成功";
+            await loadRules(currentRuleId);
           } catch (e) {
             m.className = "error";
             m.textContent = e.message;
           }
         };
 
-        document.getElementById("btn_rule_load").addEventListener("click", loadRule);
+        document.getElementById("btn_rule_refresh").addEventListener("click", () => loadRules(currentRuleId));
         document.getElementById("btn_rule_save").addEventListener("click", saveRule);
+        document.getElementById("btn_rule_new").addEventListener("click", () => {
+          const sel = document.getElementById("r_rule_select");
+          sel.value = "";
+          setFormRule({ enabled: true, work_type: "onsite", priority: 100, name: "新规则", start_time: "09:00", end_time: "10:00" });
+          currentRuleId = null;
+        });
+        document.getElementById("btn_rule_delete").addEventListener("click", async () => {
+          if (!currentRuleId) return;
+          if (!confirm("确认删除该规则？")) return;
+          try {
+            await api(`/admin/attendance/rules/${encodeURIComponent(currentRuleId)}?confirm=true`, { method: "DELETE" });
+            currentRuleId = null;
+            await loadRules(null);
+          } catch (e) {
+            const m = document.getElementById("rule_msg");
+            m.className = "error";
+            m.textContent = e.message;
+          }
+        });
+        document.getElementById("r_rule_select").addEventListener("change", (e) => {
+          const id = e.target.value;
+          const r = ruleItems.find(x => x.id === id);
+          if (r) setFormRule(r);
+        });
         document.getElementById("btn_pick_point").addEventListener("click", () => {
           ensureMap();
           updateMarkerFromInputs(true);
@@ -225,7 +379,7 @@
         });
         document.getElementById("r_lat").addEventListener("change", () => updateMarkerFromInputs(true));
         document.getElementById("r_lng").addEventListener("change", () => updateMarkerFromInputs(true));
-        await loadRule();
+        await loadRules(null);
 
         document.getElementById("btn_sync").addEventListener("click", async () => {
           const msg = document.getElementById("msg");

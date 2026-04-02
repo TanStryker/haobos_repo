@@ -29,6 +29,8 @@ class SyncIn(BaseModel):
 class AttendanceRuleIn(BaseModel):
     name: str = Field(min_length=1, default="默认规则")
     enabled: bool = True
+    work_type: str = Field(min_length=1, default="onsite")
+    priority: int = Field(default=100, ge=0)
     start_time: str = Field(min_length=4, max_length=5, default="09:00")
     end_time: str = Field(min_length=4, max_length=5, default="10:00")
     center_lat: float | None = None
@@ -63,23 +65,67 @@ def _haversine_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     return r * c
 
 
-def _get_current_rule(db: JsonDB) -> dict:
-    rule = db.find_one("attendance_rules", lambda r: r.get("id") == "current")
-    if rule:
-        return rule
-    return {
-        "id": "current",
-        "name": "默认规则",
-        "enabled": False,
-        "start_time": "09:00",
-        "end_time": "10:00",
-        "center_lat": None,
-        "center_lng": None,
-        "allowed_radius_m": None,
-        "address_hint": "",
-        "updated_at": "",
-        "updated_by": "",
+def _is_valid_work_type(value: str) -> bool:
+    return value in {"onsite", "offsite"}
+
+
+def _ensure_rules_v2(db: JsonDB) -> None:
+    legacy = db.find_one("attendance_rules", lambda r: r.get("id") == "current")
+    if not legacy:
+        return
+
+    def _to_float(v):
+        if v is None or v == "":
+            return None
+        try:
+            return float(v)
+        except Exception:
+            return None
+
+    def _to_int(v):
+        if v is None or v == "":
+            return None
+        try:
+            return int(v)
+        except Exception:
+            return None
+
+    new_rule = {
+        "id": str(uuid.uuid4()),
+        "name": legacy.get("name", "默认规则"),
+        "enabled": bool(legacy.get("enabled", False)),
+        "work_type": "onsite",
+        "priority": 100,
+        "start_time": legacy.get("start_time", "09:00"),
+        "end_time": legacy.get("end_time", "10:00"),
+        "center_lat": _to_float(legacy.get("center_lat")),
+        "center_lng": _to_float(legacy.get("center_lng")),
+        "allowed_radius_m": _to_int(legacy.get("allowed_radius_m")),
+        "address_hint": legacy.get("address_hint", "") or "",
+        "updated_at": legacy.get("updated_at", "") or now_iso(),
+        "updated_by": legacy.get("updated_by", "") or "migration",
+        "created_at": now_iso(),
     }
+    db.insert("attendance_rules", new_rule)
+    db.delete_one("attendance_rules", lambda r: r.get("id") == "current")
+
+
+def _list_all_rules(db: JsonDB) -> list[dict]:
+    _ensure_rules_v2(db)
+    rows = db.read_all("attendance_rules")
+    return [r for r in rows if r.get("id") != "current"]
+
+
+def _rules_for_work_type(rules: list[dict], work_type: str) -> list[dict]:
+    out = []
+    for r in rules:
+        if not r.get("enabled", False):
+            continue
+        if str(r.get("work_type", "")) != work_type:
+            continue
+        out.append(r)
+    out.sort(key=lambda x: int(x.get("priority", 100)))
+    return out
 
 
 def _validate_punch(rule: dict, punch_dt: datetime, lat: float | None, lng: float | None) -> tuple[bool, str]:
@@ -139,7 +185,24 @@ def admin_sync_attendance(
 
 @router.get("/admin/attendance/rule")
 def admin_get_attendance_rule(admin: Annotated[AuthUser, Depends(require_admin)], db: Annotated[JsonDB, Depends(get_db)]):
-    return _get_current_rule(db)
+    rules = _rules_for_work_type(_list_all_rules(db), "onsite")
+    if rules:
+        return rules[0]
+    return {
+        "id": "",
+        "name": "默认规则",
+        "enabled": False,
+        "work_type": "onsite",
+        "priority": 100,
+        "start_time": "09:00",
+        "end_time": "10:00",
+        "center_lat": None,
+        "center_lng": None,
+        "allowed_radius_m": None,
+        "address_hint": "",
+        "updated_at": "",
+        "updated_by": "",
+    }
 
 
 @router.post("/admin/attendance/rule")
@@ -149,10 +212,39 @@ def admin_set_attendance_rule(
     db: Annotated[JsonDB, Depends(get_db)],
 ):
     rule = payload.model_dump()
-    row = {
-        "id": "current",
+    work_type = str(rule.get("work_type", "onsite"))
+    if not _is_valid_work_type(work_type):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="人员类型错误")
+    target = _rules_for_work_type(_list_all_rules(db), work_type)
+    if target:
+        rule_id = target[0].get("id")
+        def updater(r: dict) -> dict:
+            if r.get("id") != rule_id:
+                return r
+            r["name"] = rule["name"]
+            r["enabled"] = bool(rule["enabled"])
+            r["work_type"] = work_type
+            r["priority"] = int(rule.get("priority", 100))
+            r["start_time"] = rule["start_time"]
+            r["end_time"] = rule["end_time"]
+            r["center_lat"] = rule.get("center_lat")
+            r["center_lng"] = rule.get("center_lng")
+            r["allowed_radius_m"] = rule.get("allowed_radius_m")
+            r["address_hint"] = rule.get("address_hint") or ""
+            r["updated_at"] = now_iso()
+            r["updated_by"] = admin.user_id
+            return r
+        updated = db.update_one("attendance_rules", lambda r: r.get("id") == rule_id, updater)
+        if not updated:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="规则不存在")
+        return {"ok": True, "id": rule_id}
+
+    new_row = {
+        "id": str(uuid.uuid4()),
         "name": rule["name"],
         "enabled": bool(rule["enabled"]),
+        "work_type": work_type,
+        "priority": int(rule.get("priority", 100)),
         "start_time": rule["start_time"],
         "end_time": rule["end_time"],
         "center_lat": rule.get("center_lat"),
@@ -161,27 +253,130 @@ def admin_set_attendance_rule(
         "address_hint": rule.get("address_hint") or "",
         "updated_at": now_iso(),
         "updated_by": admin.user_id,
+        "created_at": now_iso(),
     }
-
-    existing = db.find_one("attendance_rules", lambda r: r.get("id") == "current")
-    if not existing:
-        db.insert("attendance_rules", row)
-        return {"ok": True}
-
-    def updater(r: dict) -> dict:
-        r.update(row)
-        return r
-
-    db.update_one("attendance_rules", lambda r: r.get("id") == "current", updater)
-    return {"ok": True}
+    db.insert("attendance_rules", new_row)
+    return {"ok": True, "id": new_row["id"]}
 
 
 @router.get("/attendance/rule")
 def employee_get_attendance_rule(user: Annotated[AuthUser, Depends(require_user)], db: Annotated[JsonDB, Depends(get_db)]):
-    rule = _get_current_rule(db)
-    public = dict(rule)
+    emp = db.find_one("employees", lambda e: e.get("employee_id") == user.user_id and e.get("active", True))
+    if not emp:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="员工信息不存在")
+    work_type = str(emp.get("work_type") or "onsite")
+    if not _is_valid_work_type(work_type):
+        work_type = "onsite"
+    rules = _rules_for_work_type(_list_all_rules(db), work_type)
+    if not rules:
+        return {"id": "", "enabled": False, "work_type": work_type}
+    public = dict(rules[0])
     public.pop("updated_by", None)
     return public
+
+
+@router.get("/attendance/rules")
+def employee_get_attendance_rules(user: Annotated[AuthUser, Depends(require_user)], db: Annotated[JsonDB, Depends(get_db)]):
+    emp = db.find_one("employees", lambda e: e.get("employee_id") == user.user_id and e.get("active", True))
+    if not emp:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="员工信息不存在")
+    work_type = str(emp.get("work_type") or "onsite")
+    if not _is_valid_work_type(work_type):
+        work_type = "onsite"
+    rules = _rules_for_work_type(_list_all_rules(db), work_type)
+    public_rules = []
+    for r in rules:
+        rr = dict(r)
+        rr.pop("updated_by", None)
+        public_rules.append(rr)
+    return {"work_type": work_type, "rules": public_rules}
+
+
+@router.get("/admin/attendance/rules")
+def admin_list_attendance_rules(admin: Annotated[AuthUser, Depends(require_admin)], db: Annotated[JsonDB, Depends(get_db)]):
+    rules = _list_all_rules(db)
+    rules.sort(key=lambda r: (str(r.get("work_type", "")), int(r.get("priority", 100)), str(r.get("name", ""))))
+    return {"items": rules}
+
+
+@router.post("/admin/attendance/rules", status_code=status.HTTP_201_CREATED)
+def admin_create_attendance_rule(
+    payload: AttendanceRuleIn,
+    admin: Annotated[AuthUser, Depends(require_admin)],
+    db: Annotated[JsonDB, Depends(get_db)],
+):
+    rule = payload.model_dump()
+    work_type = str(rule.get("work_type", "onsite"))
+    if not _is_valid_work_type(work_type):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="人员类型错误")
+    row = {
+        "id": str(uuid.uuid4()),
+        "name": rule["name"],
+        "enabled": bool(rule["enabled"]),
+        "work_type": work_type,
+        "priority": int(rule.get("priority", 100)),
+        "start_time": rule["start_time"],
+        "end_time": rule["end_time"],
+        "center_lat": rule.get("center_lat"),
+        "center_lng": rule.get("center_lng"),
+        "allowed_radius_m": rule.get("allowed_radius_m"),
+        "address_hint": rule.get("address_hint") or "",
+        "updated_at": now_iso(),
+        "updated_by": admin.user_id,
+        "created_at": now_iso(),
+    }
+    db.insert("attendance_rules", row)
+    return row
+
+
+@router.put("/admin/attendance/rules/{rule_id}")
+def admin_update_attendance_rule(
+    rule_id: str,
+    payload: AttendanceRuleIn,
+    admin: Annotated[AuthUser, Depends(require_admin)],
+    db: Annotated[JsonDB, Depends(get_db)],
+):
+    rule = payload.model_dump()
+    work_type = str(rule.get("work_type", "onsite"))
+    if not _is_valid_work_type(work_type):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="人员类型错误")
+
+    def updater(r: dict) -> dict:
+        if r.get("id") != rule_id:
+            return r
+        r["name"] = rule["name"]
+        r["enabled"] = bool(rule["enabled"])
+        r["work_type"] = work_type
+        r["priority"] = int(rule.get("priority", 100))
+        r["start_time"] = rule["start_time"]
+        r["end_time"] = rule["end_time"]
+        r["center_lat"] = rule.get("center_lat")
+        r["center_lng"] = rule.get("center_lng")
+        r["allowed_radius_m"] = rule.get("allowed_radius_m")
+        r["address_hint"] = rule.get("address_hint") or ""
+        r["updated_at"] = now_iso()
+        r["updated_by"] = admin.user_id
+        return r
+
+    updated = db.update_one("attendance_rules", lambda r: r.get("id") == rule_id, updater)
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="规则不存在")
+    return updated
+
+
+@router.delete("/admin/attendance/rules/{rule_id}")
+def admin_delete_attendance_rule(
+    rule_id: str,
+    confirm: bool = Query(default=False),
+    admin: Annotated[AuthUser, Depends(require_admin)] = None,
+    db: Annotated[JsonDB, Depends(get_db)] = None,
+):
+    if not confirm:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="需要确认删除")
+    ok = db.delete_one("attendance_rules", lambda r: r.get("id") == rule_id)
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="规则不存在")
+    return {"ok": True}
 
 
 class PunchIn(BaseModel):
@@ -209,10 +404,32 @@ def employee_punch(
         punch_dt = datetime.now()
     ts_str = punch_dt.strftime("%Y-%m-%dT%H:%M:%S")
 
-    rule = _get_current_rule(db)
-    ok, reason = _validate_punch(rule, punch_dt, payload.lat, payload.lng)
-    if not ok:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"无效打卡：{reason}")
+    work_type = str(emp.get("work_type") or "onsite")
+    if not _is_valid_work_type(work_type):
+        work_type = "onsite"
+    rules = _rules_for_work_type(_list_all_rules(db), work_type)
+    if not rules:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效打卡：未配置可用打卡规则")
+
+    matched_rule = None
+    reasons: list[str] = []
+    for r in rules:
+        ok, reason = _validate_punch(r, punch_dt, payload.lat, payload.lng)
+        if ok:
+            matched_rule = r
+            break
+        if reason:
+            reasons.append(reason)
+
+    if not matched_rule:
+        uniq = []
+        for r in reasons:
+            if r not in uniq:
+                uniq.append(r)
+        msg = "不符合任何已配置规则"
+        if uniq:
+            msg = msg + "：" + "；".join(uniq)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"无效打卡：{msg}")
 
     row = {
         "id": str(uuid.uuid4()),
@@ -223,7 +440,7 @@ def employee_punch(
         "address": payload.address,
         "lat": payload.lat,
         "lng": payload.lng,
-        "rule_id": rule.get("id", "current"),
+        "rule_id": matched_rule.get("id", ""),
         "created_at": now_iso(),
     }
     db.insert("attendance_records", row)

@@ -17,6 +17,7 @@ class EmployeeBase(BaseModel):
     name: str = Field(min_length=1)
     department: str = Field(min_length=1)
     position: str = Field(min_length=1)
+    work_type: str = Field(min_length=1, default="onsite")
     daily_salary: float = Field(ge=0)
     attendance_days: float = Field(ge=0, default=0)
     active: bool = True
@@ -27,6 +28,7 @@ class EmployeeCreate(BaseModel):
     name: str = Field(min_length=1)
     department: str = Field(min_length=1)
     position: str = Field(min_length=1)
+    work_type: str = Field(min_length=1, default="onsite")
     daily_salary: float = Field(ge=0)
     attendance_days: float = Field(ge=0, default=0)
 
@@ -35,6 +37,7 @@ class EmployeeUpdate(BaseModel):
     name: str | None = None
     department: str | None = None
     position: str | None = None
+    work_type: str | None = None
     daily_salary: float | None = Field(default=None, ge=0)
     attendance_days: float | None = Field(default=None, ge=0)
     active: bool | None = None
@@ -46,6 +49,7 @@ def _employee_public(row: dict) -> dict:
         "name": row.get("name", ""),
         "department": row.get("department", ""),
         "position": row.get("position", ""),
+        "work_type": row.get("work_type", "onsite"),
         "daily_salary": row.get("daily_salary", 0),
         "attendance_days": row.get("attendance_days", 0),
         "active": bool(row.get("active", True)),
@@ -118,6 +122,7 @@ def admin_create_employee(
         "name": payload.name,
         "department": payload.department,
         "position": payload.position,
+        "work_type": payload.work_type if payload.work_type in {"onsite", "offsite"} else "onsite",
         "daily_salary": payload.daily_salary,
         "attendance_days": payload.attendance_days,
         "active": True,
@@ -175,6 +180,8 @@ def admin_update_employee(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="员工不存在")
 
     update_data = payload.model_dump(exclude_unset=True)
+    if "work_type" in update_data and update_data["work_type"] is not None and update_data["work_type"] not in {"onsite", "offsite"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="人员类型错误")
     if not update_data:
         return _employee_public(before)
 
@@ -331,6 +338,8 @@ def admin_approve_change_request(
     field_name = str(req.get("field", "")).strip()
     if field_name == "employee_id":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不允许修改工号")
+    if field_name == "work_type":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不允许通过申请修改人员类型")
 
     new_value_raw = req.get("new_value", "")
     cast_value: Any = new_value_raw
