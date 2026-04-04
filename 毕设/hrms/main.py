@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from hrms.core.auth import SessionStore, ensure_default_admin
 from hrms.core.oplog import append_oplog
-from hrms.storage.json_db import JsonDB
+from hrms.storage.sqlite_db import SQLiteDB
 from hrms.modules.auth_routes import router as auth_router
 from hrms.modules.employees_routes import router as employees_router
 from hrms.modules.overtime_routes import router as overtime_router
@@ -34,7 +34,10 @@ def create_app() -> FastAPI:
     log_dir = os.path.join(os.path.dirname(base_dir), "logs")
     ui_dir = os.path.join(os.path.dirname(base_dir), "ui")
 
-    db = JsonDB(data_dir)
+    db_path = os.environ.get("HRMS_DB_PATH") or os.path.join(data_dir, "hrms.sqlite3")
+    db = SQLiteDB(db_path)
+    db.init_schema()
+    db.migrate_from_json_dir(data_dir)
     ensure_default_admin(db)
 
     app.state.db = db

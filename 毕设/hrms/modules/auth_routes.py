@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from hrms.core.auth import AuthUser, SessionStore, authenticate, get_db, get_sessions, require_user
 from hrms.core.security import hash_password, verify_password
-from hrms.storage.json_db import JsonDB, now_iso
+from hrms.storage.sqlite_db import SQLiteDB, now_iso
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -26,7 +26,7 @@ class LoginOut(BaseModel):
 
 
 @router.post("/login", response_model=LoginOut)
-def login(payload: LoginIn, db: Annotated[JsonDB, Depends(get_db)], sessions: Annotated[SessionStore, Depends(get_sessions)]):
+def login(payload: LoginIn, db: Annotated[SQLiteDB, Depends(get_db)], sessions: Annotated[SessionStore, Depends(get_sessions)]):
     user = authenticate(db, payload.user_id, payload.password)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="账号或密码错误")
@@ -62,7 +62,7 @@ class ChangePasswordIn(BaseModel):
 
 
 @router.post("/change-password")
-def change_password(payload: ChangePasswordIn, user: Annotated[AuthUser, Depends(require_user)], db: Annotated[JsonDB, Depends(get_db)]):
+def change_password(payload: ChangePasswordIn, user: Annotated[AuthUser, Depends(require_user)], db: Annotated[SQLiteDB, Depends(get_db)]):
     db_user = db.find_one("users", lambda u: u.get("user_id") == user.user_id and u.get("active", True))
     if not db_user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="账号不存在")

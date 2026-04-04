@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from hrms.core.auth import AuthUser, get_db, require_admin, require_user
-from hrms.storage.json_db import JsonDB, now_iso
+from hrms.storage.sqlite_db import SQLiteDB, now_iso
 
 
 router = APIRouter(tags=["attendance"])
@@ -69,7 +69,7 @@ def _is_valid_work_type(value: str) -> bool:
     return value in {"onsite", "offsite"}
 
 
-def _ensure_rules_v2(db: JsonDB) -> None:
+def _ensure_rules_v2(db: SQLiteDB) -> None:
     legacy = db.find_one("attendance_rules", lambda r: r.get("id") == "current")
     if not legacy:
         return
@@ -110,7 +110,7 @@ def _ensure_rules_v2(db: JsonDB) -> None:
     db.delete_one("attendance_rules", lambda r: r.get("id") == "current")
 
 
-def _list_all_rules(db: JsonDB) -> list[dict]:
+def _list_all_rules(db: SQLiteDB) -> list[dict]:
     _ensure_rules_v2(db)
     rows = db.read_all("attendance_rules")
     return [r for r in rows if r.get("id") != "current"]
@@ -159,7 +159,7 @@ def _validate_punch(rule: dict, punch_dt: datetime, lat: float | None, lng: floa
 def admin_sync_attendance(
     payload: SyncIn,
     admin: Annotated[AuthUser, Depends(require_admin)],
-    db: Annotated[JsonDB, Depends(get_db)],
+    db: Annotated[SQLiteDB, Depends(get_db)],
 ):
     records = payload.records or []
     inserted = 0
@@ -184,7 +184,7 @@ def admin_sync_attendance(
 
 
 @router.get("/admin/attendance/rule")
-def admin_get_attendance_rule(admin: Annotated[AuthUser, Depends(require_admin)], db: Annotated[JsonDB, Depends(get_db)]):
+def admin_get_attendance_rule(admin: Annotated[AuthUser, Depends(require_admin)], db: Annotated[SQLiteDB, Depends(get_db)]):
     rules = _rules_for_work_type(_list_all_rules(db), "onsite")
     if rules:
         return rules[0]
@@ -209,7 +209,7 @@ def admin_get_attendance_rule(admin: Annotated[AuthUser, Depends(require_admin)]
 def admin_set_attendance_rule(
     payload: AttendanceRuleIn,
     admin: Annotated[AuthUser, Depends(require_admin)],
-    db: Annotated[JsonDB, Depends(get_db)],
+    db: Annotated[SQLiteDB, Depends(get_db)],
 ):
     rule = payload.model_dump()
     work_type = str(rule.get("work_type", "onsite"))
@@ -260,7 +260,7 @@ def admin_set_attendance_rule(
 
 
 @router.get("/attendance/rule")
-def employee_get_attendance_rule(user: Annotated[AuthUser, Depends(require_user)], db: Annotated[JsonDB, Depends(get_db)]):
+def employee_get_attendance_rule(user: Annotated[AuthUser, Depends(require_user)], db: Annotated[SQLiteDB, Depends(get_db)]):
     emp = db.find_one("employees", lambda e: e.get("employee_id") == user.user_id and e.get("active", True))
     if not emp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="员工信息不存在")
@@ -276,7 +276,7 @@ def employee_get_attendance_rule(user: Annotated[AuthUser, Depends(require_user)
 
 
 @router.get("/attendance/rules")
-def employee_get_attendance_rules(user: Annotated[AuthUser, Depends(require_user)], db: Annotated[JsonDB, Depends(get_db)]):
+def employee_get_attendance_rules(user: Annotated[AuthUser, Depends(require_user)], db: Annotated[SQLiteDB, Depends(get_db)]):
     emp = db.find_one("employees", lambda e: e.get("employee_id") == user.user_id and e.get("active", True))
     if not emp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="员工信息不存在")
@@ -293,7 +293,7 @@ def employee_get_attendance_rules(user: Annotated[AuthUser, Depends(require_user
 
 
 @router.get("/admin/attendance/rules")
-def admin_list_attendance_rules(admin: Annotated[AuthUser, Depends(require_admin)], db: Annotated[JsonDB, Depends(get_db)]):
+def admin_list_attendance_rules(admin: Annotated[AuthUser, Depends(require_admin)], db: Annotated[SQLiteDB, Depends(get_db)]):
     rules = _list_all_rules(db)
     rules.sort(key=lambda r: (str(r.get("work_type", "")), int(r.get("priority", 100)), str(r.get("name", ""))))
     return {"items": rules}
@@ -303,7 +303,7 @@ def admin_list_attendance_rules(admin: Annotated[AuthUser, Depends(require_admin
 def admin_create_attendance_rule(
     payload: AttendanceRuleIn,
     admin: Annotated[AuthUser, Depends(require_admin)],
-    db: Annotated[JsonDB, Depends(get_db)],
+    db: Annotated[SQLiteDB, Depends(get_db)],
 ):
     rule = payload.model_dump()
     work_type = str(rule.get("work_type", "onsite"))
@@ -334,7 +334,7 @@ def admin_update_attendance_rule(
     rule_id: str,
     payload: AttendanceRuleIn,
     admin: Annotated[AuthUser, Depends(require_admin)],
-    db: Annotated[JsonDB, Depends(get_db)],
+    db: Annotated[SQLiteDB, Depends(get_db)],
 ):
     rule = payload.model_dump()
     work_type = str(rule.get("work_type", "onsite"))
@@ -369,7 +369,7 @@ def admin_delete_attendance_rule(
     rule_id: str,
     confirm: bool = Query(default=False),
     admin: Annotated[AuthUser, Depends(require_admin)] = None,
-    db: Annotated[JsonDB, Depends(get_db)] = None,
+    db: Annotated[SQLiteDB, Depends(get_db)] = None,
 ):
     if not confirm:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="需要确认删除")
@@ -390,7 +390,7 @@ class PunchIn(BaseModel):
 def employee_punch(
     payload: PunchIn,
     user: Annotated[AuthUser, Depends(require_user)],
-    db: Annotated[JsonDB, Depends(get_db)],
+    db: Annotated[SQLiteDB, Depends(get_db)],
 ):
     emp = db.find_one("employees", lambda e: e.get("employee_id") == user.user_id and e.get("active", True))
     if not emp:
@@ -454,7 +454,7 @@ def employee_punch(
 def employee_punch_history(
     limit: int = Query(default=5, ge=1, le=50),
     user: Annotated[AuthUser, Depends(require_user)] = None,
-    db: Annotated[JsonDB, Depends(get_db)] = None,
+    db: Annotated[SQLiteDB, Depends(get_db)] = None,
 ):
     items = db.find_many(
         "attendance_records",
@@ -467,7 +467,7 @@ def employee_punch_history(
 @router.get("/admin/attendance/records")
 def admin_list_attendance_records(
     admin: Annotated[AuthUser, Depends(require_admin)],
-    db: Annotated[JsonDB, Depends(get_db)],
+    db: Annotated[SQLiteDB, Depends(get_db)],
     employee_id: str | None = Query(default=None),
     month: str | None = Query(default=None),
 ):
@@ -490,7 +490,7 @@ class AdjustIn(BaseModel):
 def admin_adjust_attendance(
     payload: AdjustIn,
     admin: Annotated[AuthUser, Depends(require_admin)],
-    db: Annotated[JsonDB, Depends(get_db)],
+    db: Annotated[SQLiteDB, Depends(get_db)],
 ):
     existing = db.find_one("attendance_records", lambda r: r.get("employee_id") == payload.employee_id and r.get("ts") == payload.ts)
     if existing:
@@ -528,7 +528,7 @@ def _attendance_days(records: list[dict]) -> float:
     return float(len(days))
 
 
-def _update_employee_attendance_days(db: JsonDB, employee_id: str, month: str) -> None:
+def _update_employee_attendance_days(db: SQLiteDB, employee_id: str, month: str) -> None:
     records = db.find_many(
         "attendance_records",
         lambda r: r.get("employee_id") == employee_id and str(r.get("ts", "")).startswith(month),
@@ -545,7 +545,7 @@ def _update_employee_attendance_days(db: JsonDB, employee_id: str, month: str) -
 def admin_attendance_stats(
     month: str,
     admin: Annotated[AuthUser, Depends(require_admin)],
-    db: Annotated[JsonDB, Depends(get_db)],
+    db: Annotated[SQLiteDB, Depends(get_db)],
 ):
     items = db.find_many("attendance_records", lambda r: str(r.get("ts", "")).startswith(month))
     grouped: dict[str, list[dict]] = defaultdict(list)
@@ -560,7 +560,7 @@ def admin_attendance_stats(
 def employee_attendance_stats(
     month: str,
     user: Annotated[AuthUser, Depends(require_user)],
-    db: Annotated[JsonDB, Depends(get_db)],
+    db: Annotated[SQLiteDB, Depends(get_db)],
 ):
     items = db.find_many("attendance_records", lambda r: r.get("employee_id") == user.user_id and str(r.get("ts", "")).startswith(month))
     return {"month": month, "employee_id": user.user_id, "attendance_days": _attendance_days(items)}
@@ -570,7 +570,7 @@ def employee_attendance_stats(
 def employee_attendance_records(
     month: str,
     user: Annotated[AuthUser, Depends(require_user)],
-    db: Annotated[JsonDB, Depends(get_db)],
+    db: Annotated[SQLiteDB, Depends(get_db)],
 ):
     items = db.find_many("attendance_records", lambda r: r.get("employee_id") == user.user_id and str(r.get("ts", "")).startswith(month))
     items.sort(key=lambda r: r.get("ts", ""))

@@ -6,7 +6,7 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from hrms.core.security import default_session_expiry, new_token, now_utc, verify_password
-from hrms.storage.json_db import JsonDB, now_iso
+from hrms.storage.sqlite_db import SQLiteDB, now_iso
 
 
 @dataclass(frozen=True)
@@ -47,7 +47,7 @@ class SessionStore:
         self._sessions.pop(token, None)
 
 
-def get_db(request: Request) -> JsonDB:
+def get_db(request: Request) -> SQLiteDB:
     return request.app.state.db
 
 
@@ -55,11 +55,26 @@ def get_sessions(request: Request) -> SessionStore:
     return request.app.state.sessions
 
 
-def ensure_default_admin(db: JsonDB) -> None:
+def ensure_default_admin(db: SQLiteDB) -> None:
     users = db.read_all("users")
     if any(u.get("role") == "admin" for u in users):
         return
     from hrms.core.security import hash_password
+    if not db.find_one("employees", lambda e: e.get("employee_id") == "admin"):
+        db.insert(
+            "employees",
+            {
+                "employee_id": "admin",
+                "name": "系统管理员",
+                "department": "系统",
+                "position": "管理员",
+                "work_type": "onsite",
+                "daily_salary": 0,
+                "attendance_days": 0,
+                "active": True,
+                "hire_date": "1970-01-01",
+            },
+        )
     admin = {
         "user_id": "admin",
         "role": "admin",
@@ -72,7 +87,7 @@ def ensure_default_admin(db: JsonDB) -> None:
     db.insert("users", admin)
 
 
-def authenticate(db: JsonDB, user_id: str, password: str) -> dict | None:
+def authenticate(db: SQLiteDB, user_id: str, password: str) -> dict | None:
     user = db.find_one("users", lambda u: u.get("user_id") == user_id and u.get("active", True))
     if not user:
         return None
@@ -83,7 +98,7 @@ def authenticate(db: JsonDB, user_id: str, password: str) -> dict | None:
 
 def require_user(
     creds: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
-    db: Annotated[JsonDB, Depends(get_db)],
+    db: Annotated[SQLiteDB, Depends(get_db)],
     sessions: Annotated[SessionStore, Depends(get_sessions)],
 ) -> AuthUser:
     if creds is None or not creds.credentials:

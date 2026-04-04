@@ -6,14 +6,14 @@ from pydantic import BaseModel, Field
 
 from hrms.core.auth import AuthUser, get_db, require_admin
 from hrms.core.security import hash_password
-from hrms.storage.json_db import JsonDB, now_iso
+from hrms.storage.sqlite_db import SQLiteDB, now_iso
 
 
 router = APIRouter(tags=["system"])
 
 
 @router.get("/admin/users")
-def admin_list_users(admin: Annotated[AuthUser, Depends(require_admin)], db: Annotated[JsonDB, Depends(get_db)]):
+def admin_list_users(admin: Annotated[AuthUser, Depends(require_admin)], db: Annotated[SQLiteDB, Depends(get_db)]):
     users = db.read_all("users")
     users.sort(key=lambda u: u.get("user_id", ""))
     out = []
@@ -38,7 +38,7 @@ class UserCreateIn(BaseModel):
 
 
 @router.post("/admin/users", status_code=status.HTTP_201_CREATED)
-def admin_create_user(payload: UserCreateIn, admin: Annotated[AuthUser, Depends(require_admin)], db: Annotated[JsonDB, Depends(get_db)]):
+def admin_create_user(payload: UserCreateIn, admin: Annotated[AuthUser, Depends(require_admin)], db: Annotated[SQLiteDB, Depends(get_db)]):
     exists = db.find_one("users", lambda u: u.get("user_id") == payload.user_id)
     if exists:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="账号已存在")
@@ -60,7 +60,7 @@ def admin_delete_user(
     user_id: str,
     confirm: bool = Query(default=False),
     admin: Annotated[AuthUser, Depends(require_admin)] = None,
-    db: Annotated[JsonDB, Depends(get_db)] = None,
+    db: Annotated[SQLiteDB, Depends(get_db)] = None,
 ):
     if not confirm:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="需要确认删除")
@@ -81,7 +81,7 @@ def admin_reset_password(
     user_id: str,
     payload: ResetPasswordIn,
     admin: Annotated[AuthUser, Depends(require_admin)],
-    db: Annotated[JsonDB, Depends(get_db)],
+    db: Annotated[SQLiteDB, Depends(get_db)],
 ):
     def updater(row: dict) -> dict:
         row["password_hash"] = hash_password(payload.new_password)
@@ -117,13 +117,13 @@ class ConfigSetIn(BaseModel):
 
 
 @router.get("/admin/config")
-def admin_get_config(admin: Annotated[AuthUser, Depends(require_admin)], db: Annotated[JsonDB, Depends(get_db)]):
+def admin_get_config(admin: Annotated[AuthUser, Depends(require_admin)], db: Annotated[SQLiteDB, Depends(get_db)]):
     items = db.read_all("system_config")
     return {"items": items}
 
 
 @router.post("/admin/config")
-def admin_set_config(payload: ConfigSetIn, admin: Annotated[AuthUser, Depends(require_admin)], db: Annotated[JsonDB, Depends(get_db)]):
+def admin_set_config(payload: ConfigSetIn, admin: Annotated[AuthUser, Depends(require_admin)], db: Annotated[SQLiteDB, Depends(get_db)]):
     existing = db.find_one("system_config", lambda r: r.get("key") == payload.key)
     if not existing:
         db.insert("system_config", {"key": payload.key, "value": payload.value, "updated_at": now_iso(), "updated_by": admin.user_id})
