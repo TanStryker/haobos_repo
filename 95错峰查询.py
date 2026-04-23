@@ -312,6 +312,31 @@ def _unique_sheet_title(base: str, used: set[str]) -> str:
         i += 1
 
 
+def _clean_excel_str(s: str) -> str:
+    out = []
+    for ch in str(s):
+        o = ord(ch)
+        if (o < 32 and o not in (9, 10, 13)) or o == 127:
+            out.append(" ")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def _clean_df_for_excel(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return df
+    def _clean_value(v):
+        if isinstance(v, str):
+            return _clean_excel_str(v)
+        if isinstance(v, (int, float, bool)) or v is None:
+            return v
+        return _clean_excel_str(str(v))
+    for col in df.columns:
+        df[col] = df[col].map(_clean_value)
+    return df
+
+
 def _resolve_output_dir(base_dir_input: str | None) -> str:
     base_dir = (base_dir_input or "").strip()
     if not base_dir:
@@ -1075,12 +1100,14 @@ def scan_early_peak_channels(es, start_date, end_date, output_dir: str, scan_mod
         df = pd.DataFrame(target_records)
         if scan_mode == "offline_before_evening":
             df = df[["日期", "渠道ID", "日95峰值", "峰值时刻", "00:00_total_up_speed(Gb)", "10:00_total_up_speed(Gb)", "19:00_total_up_speed(Gb)", "00-19差值(Gb)", "阈值(10:00*5%)(Gb)", "错峰原因"]]
+            df = _clean_df_for_excel(df)
             output_file = os.path.join(
                 output_dir,
                 _safe_filename(f"晚高峰前离线渠道汇总_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}") + ".xlsx",
             )
         else:
             df = df[["时间戳", "维度", "运营商", "上行带宽", "渠道ID", "00:00_total_up_speed(Gb)", "10:00_total_up_speed(Gb)", "19:00_total_up_speed(Gb)", "00-19差值(Gb)", "阈值(10:00*5%)(Gb)", "错峰原因"]]
+            df = _clean_df_for_excel(df)
             output_file = os.path.join(
                 output_dir,
                 _safe_filename(f"8点-17点峰值汇总_综合_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}") + ".xlsx",
@@ -1458,10 +1485,12 @@ def main():
                 if early_peak_records:
                     df_early = pd.DataFrame(early_peak_records)
                     df_early = df_early[["时间戳", "维度", "运营商", "上行带宽", "渠道ID"]]
+                    df_early = _clean_df_for_excel(df_early)
                     df_early.to_excel(writer, sheet_name=_unique_sheet_title("12点前峰值汇总", used_sheet_names), index=False)
                 
                 if api_times_records:
                     df_api_times = pd.DataFrame(api_times_records)
+                    df_api_times = _clean_df_for_excel(df_api_times)
                     df_api_times.to_excel(writer, sheet_name=_unique_sheet_title("接口获取时间", used_sheet_names), index=False)
                     print(f"✅ 已写入 {len(api_times_records)} 条记录到 Sheet: 接口获取时间")
 
@@ -1477,16 +1506,19 @@ def main():
                                 df_diff[c] = 0
                     other_cols = sorted([c for c in df_diff.columns if c not in base_cols])
                     df_diff = df_diff[base_cols + other_cols]
+                    df_diff = _clean_df_for_excel(df_diff)
                     df_diff.to_excel(writer, sheet_name=_unique_sheet_title("渠道带宽差汇总", used_sheet_names), index=False)
                     print(f"✅ 已写入 {len(diff_summary_records)} 条记录到 Sheet: 渠道带宽差汇总")
                 
                 if program_name_summary_records:
                     df_program = pd.DataFrame(program_name_summary_records)
+                    df_program = _clean_df_for_excel(df_program)
                     df_program.to_excel(writer, sheet_name=_unique_sheet_title("按节目名称95峰值汇总", used_sheet_names), index=False)
                     print(f"✅ 已写入 {len(program_name_summary_records)} 条记录到 Sheet: 按节目名称95峰值汇总")
                 
                 if business_diff_records:
                     df_biz_diff = pd.DataFrame(business_diff_records)
+                    df_biz_diff = _clean_df_for_excel(df_biz_diff)
                     df_biz_diff.to_excel(writer, sheet_name=_unique_sheet_title("分业务错峰带宽差", used_sheet_names), index=False)
                     print(f"✅ 已写入 {len(business_diff_records)} 条记录到 Sheet: 分业务错峰带宽差")
                 
@@ -1494,6 +1526,7 @@ def main():
                     df_pivot = pd.DataFrame(business_pivot_records)
                     # 排序：日期、渠道ID
                     df_pivot = df_pivot.sort_values(by=["日期", "渠道ID"])
+                    df_pivot = _clean_df_for_excel(df_pivot)
                     df_pivot.to_excel(writer, sheet_name=_unique_sheet_title("业务带宽差值汇总", used_sheet_names), index=False)
                     print(f"✅ 已写入 {len(business_pivot_records)} 条记录到 Sheet: 业务带宽差值汇总")
                 
@@ -1538,6 +1571,7 @@ def main():
                         dynamic_cols = sorted([c for c in df_combined.columns if c not in cols])
                         final_cols = [c for c in (cols + dynamic_cols) if c in df_combined.columns]
                         df_combined = df_combined[final_cols]
+                        df_combined = _clean_df_for_excel(df_combined)
                         
                         sheet_name = _unique_sheet_title(f"{channel}_95汇总", used_sheet_names)
                         df_combined.to_excel(writer, sheet_name=sheet_name, index=False)
@@ -1547,6 +1581,7 @@ def main():
                             df_raw = pd.DataFrame(results['raw'])
                             # 排序：日期、维度、时间、运营商
                             df_raw = df_raw.sort_values(by=["日期", "维度", "时间", "运营商"])
+                            df_raw = _clean_df_for_excel(df_raw)
                             raw_sheet_name = _unique_sheet_title(f"{channel}_明细", used_sheet_names)
                             df_raw.to_excel(writer, sheet_name=raw_sheet_name, index=False)
                             print(f"✅ 渠道 {channel} 数据已写入 Sheet: {sheet_name} 和 {raw_sheet_name}")
