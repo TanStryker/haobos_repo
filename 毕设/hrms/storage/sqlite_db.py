@@ -15,7 +15,7 @@ class SQLiteDB:
         self.db_path = db_path
         os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
         self._lock = threading.Lock()
-        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        self._conn = sqlite3.connect(self.db_path, check_same_thread=False, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
         with self._lock:
             self._conn.execute("PRAGMA foreign_keys = ON")
@@ -209,9 +209,54 @@ class SQLiteDB:
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_by TEXT NOT NULL DEFAULT ''
         );
+
+        DROP TABLE IF EXISTS session_store;
+        CREATE TABLE session_store (
+            user_id TEXT PRIMARY KEY,
+            token TEXT NOT NULL,
+            role TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            tab_id TEXT NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_session_store_token ON session_store(token);
         """
         with self._lock:
             self._conn.executescript(ddl)
+
+    def upsert_session(self, user_id: str, token: str, role: str, expires_at: str, tab_id: str) -> None:
+        uid = str(user_id or "").strip()
+        tok = str(token or "").strip()
+        r = str(role or "").strip() or "employee"
+        exp = str(expires_at or "").strip()
+        tab = str(tab_id or "").strip()
+        if not uid or not tok or not exp or not tab:
+            raise ValueError("invalid session params")
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO session_store(user_id, token, role, expires_at, tab_id) VALUES(?,?,?,?,?) "
+                "ON CONFLICT(user_id) DO UPDATE SET token=excluded.token, role=excluded.role, expires_at=excluded.expires_at, tab_id=excluded.tab_id",
+                (uid, tok, r, exp, tab),
+            )
+
+    def get_session_by_token(self, token: str) -> dict | None:
+        tok = str(token or "").strip()
+        if not tok:
+            return None
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT user_id, token, role, expires_at, tab_id FROM session_store WHERE token = ?",
+                (tok,),
+            ).fetchone()
+            if not row:
+                return None
+            return dict(row)
+
+    def delete_session_by_token(self, token: str) -> None:
+        tok = str(token or "").strip()
+        if not tok:
+            return
+        with self._lock:
+            self._conn.execute("DELETE FROM session_store WHERE token = ?", (tok,))
 
     def read_all(self, name: str) -> list[dict]:
         if name == "employees":

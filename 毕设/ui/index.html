@@ -23,6 +23,12 @@
         <div class="hint" id="now"></div>
       </div>
 
+      <div class="card" id="card_overview" style="display:none;">
+        <h2>信息汇总</h2>
+        <div id="ov_msg" class="hint"></div>
+        <div id="ov_box"></div>
+      </div>
+
       <div class="card" id="card_dashboard" style="display:none;">
         <h2>流程中心</h2>
         <div id="dash_msg" class="hint"></div>
@@ -49,8 +55,8 @@
       }
 
       async function resolveDisplayName() {
-        const role = localStorage.getItem("role") || "";
-        const userId = localStorage.getItem("user_id") || "";
+        const role = getRole();
+        const userId = sessionStorage.getItem("user_id") || "";
         if (role === "employee") {
           try {
             const emp = await api("/me/employee");
@@ -65,15 +71,18 @@
         const me = await ensureMe();
         const outCard = document.getElementById("card_logged_out");
         const inCard = document.getElementById("card_logged_in");
+        const ovCard = document.getElementById("card_overview");
         const dashCard = document.getElementById("card_dashboard");
         if (!me) {
           outCard.style.display = "";
           inCard.style.display = "none";
+          ovCard.style.display = "none";
           dashCard.style.display = "none";
           return;
         }
         outCard.style.display = "none";
         inCard.style.display = "";
+        ovCard.style.display = "";
         dashCard.style.display = "";
 
         const name = await resolveDisplayName();
@@ -82,6 +91,58 @@
         const tick = () => { nowEl.textContent = `现在是（${fmtNow(new Date())}）`; };
         tick();
         setInterval(tick, 1000 * 10);
+
+        const ovMsg = document.getElementById("ov_msg");
+        const ovBox = document.getElementById("ov_box");
+        ovMsg.className = "hint";
+        ovMsg.textContent = "加载汇总中...";
+        ovBox.innerHTML = "";
+        try {
+          const overview = await api("/dashboard/overview");
+          ovMsg.className = "ok";
+          ovMsg.textContent = "";
+          const ul = document.createElement("ul");
+          ul.style.marginTop = "6px";
+          const counts = overview.counts || {};
+          if (overview.role === "admin") {
+            const items = [
+              ["员工总数", counts.employees_total],
+              ["在职员工", counts.employees_active],
+              ["账号总数", counts.users_total],
+              ["启用考勤规则", counts.attendance_rules_enabled],
+              ["待处理信息修改申请", counts.pending_change_requests],
+              ["待处理加班申请", counts.pending_overtime_requests],
+              ["打卡记录总数", counts.attendance_records_total],
+            ];
+            for (const [k, v] of items) {
+              const li = document.createElement("li");
+              li.textContent = `${k}：${v ?? 0}`;
+              ul.appendChild(li);
+            }
+          } else {
+            const p = overview.profile || {};
+            const head = document.createElement("div");
+            head.className = "hint";
+            const wt = p.work_type === "onsite" ? "驻场" : (p.work_type === "offsite" ? "外派" : (p.work_type || ""));
+            head.textContent = `工号：${p.employee_id || ""}  部门：${p.department || ""}  职位：${p.position || ""}  人员类型：${wt}`;
+            ovBox.appendChild(head);
+            const items = [
+              ["待处理信息修改申请", counts.pending_change_requests],
+              ["待处理加班申请", counts.pending_overtime_requests],
+              ["打卡记录总数", counts.attendance_records_total],
+              ["最近一次打卡时间", overview.last_check_time || ""],
+            ];
+            for (const [k, v] of items) {
+              const li = document.createElement("li");
+              li.textContent = `${k}：${v ?? ""}`;
+              ul.appendChild(li);
+            }
+          }
+          ovBox.appendChild(ul);
+        } catch (e) {
+          ovMsg.className = "error";
+          ovMsg.textContent = e.message;
+        }
 
         const dashMsg = document.getElementById("dash_msg");
         dashMsg.className = "hint";

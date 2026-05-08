@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
@@ -26,11 +26,17 @@ class LoginOut(BaseModel):
 
 
 @router.post("/login", response_model=LoginOut)
-def login(payload: LoginIn, db: Annotated[SQLiteDB, Depends(get_db)], sessions: Annotated[SessionStore, Depends(get_sessions)]):
+def login(
+    payload: LoginIn,
+    request: Request,
+    db: Annotated[SQLiteDB, Depends(get_db)],
+    sessions: Annotated[SessionStore, Depends(get_sessions)],
+):
     user = authenticate(db, payload.user_id, payload.password)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="账号或密码错误")
-    sess = sessions.create(user_id=user["user_id"], role=user.get("role", "employee"))
+    tab_id = request.headers.get("X-HRMS-Tab", "") or "-"
+    sess = sessions.create(user_id=user["user_id"], role=user.get("role", "employee"), tab_id=tab_id)
     return LoginOut(
         token=sess["token"],
         user_id=user["user_id"],

@@ -22,7 +22,7 @@
             <input id="password" type="password" placeholder="请输入密码" />
           </div>
           <div style="align-self:flex-end;">
-            <button class="btn primary" id="btn_login">登录</button>
+            <button class="btn primary" id="btn_login" type="button">登录</button>
           </div>
         </div>
         <div id="msg" class="hint" style="margin-top:10px;"></div>
@@ -41,9 +41,11 @@
             const password = document.getElementById("password").value;
             const data = await api("/auth/login", { method: "POST", body: JSON.stringify({ user_id: userId, password }) });
             setAuth(data.token, data.user_id, data.role);
+            const me = await ensureMe();
+            if (!me) throw new Error("登录会话无效，请重试");
             msg.className = "ok";
             msg.textContent = "登录成功";
-            window.location.href = "/ui/index.html";
+            window.location.replace("/ui/index.html");
           } catch (e) {
             msg.className = "error";
             msg.textContent = e.message;
@@ -53,4 +55,3 @@
     </script>
   </body>
 </html>
-

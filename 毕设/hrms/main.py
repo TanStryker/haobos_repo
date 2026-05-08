@@ -41,7 +41,7 @@ def create_app() -> FastAPI:
     ensure_default_admin(db)
 
     app.state.db = db
-    app.state.sessions = SessionStore()
+    app.state.sessions = SessionStore(db)
     app.state.log_dir = log_dir
 
     @app.on_event("shutdown")

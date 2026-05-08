@@ -106,25 +106,21 @@ Page({
   toHistory() {
     wx.navigateTo({ url: "/pages/history/history" });
   },
-  async onChooseAndPunch() {
+  async onLocateAndPunch() {
     this.setData({ loading: true, msg: "", msgType: "hint" });
     try {
       const loc = await new Promise((resolve, reject) => {
-        wx.chooseLocation({
+        wx.getLocation({
+          type: "gcj02",
+          isHighAccuracy: true,
           success: resolve,
-          fail: (err) => reject(new Error(err.errMsg || "获取位置失败"))
+          fail: (err) => reject(new Error(err.errMsg || "获取定位失败"))
         });
       });
-      const address = (loc.address || "") + (loc.name ? ` ${loc.name}` : "");
+      const address = "自动定位";
       const lat = loc.latitude;
       const lng = loc.longitude;
       const ts = nowIsoLocal();
-      const dt = new Date();
-      const v = validatePunchAny(this.data.rules, dt, lat, lng);
-      if (!v.ok) {
-        this.setData({ msg: `无效打卡：${v.reason}`, msgType: "error" });
-        return;
-      }
       await request("/me/attendance/punch", {
         method: "POST",
         header: { "Content-Type": "application/json" },

@@ -18,7 +18,7 @@
       </view>
     </view>
   </view>
-  <button class="btn" type="primary" bindtap="onChooseAndPunch" loading="{{loading}}">获取定位并打卡</button>
+  <button class="btn" type="primary" bindtap="onLocateAndPunch" loading="{{loading}}">获取定位并打卡</button>
   <button class="btn" bindtap="toHistory">查看最近5次</button>
   <view class="hint {{msgType}}">{{msg}}</view>
 </view>

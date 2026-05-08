@@ -19,32 +19,38 @@ _bearer = HTTPBearer(auto_error=False)
 
 
 class SessionStore:
-    def __init__(self):
-        self._sessions: dict[str, dict] = {}
+    def __init__(self, db: SQLiteDB):
+        self._db = db
 
-    def create(self, user_id: str, role: str) -> dict:
+    def create(self, user_id: str, role: str, tab_id: str) -> dict:
         token = new_token()
         expires_at = default_session_expiry()
         sess = {"token": token, "user_id": user_id, "role": role, "expires_at": expires_at.isoformat()}
-        self._sessions[token] = sess
+        safe_tab = str(tab_id or "").strip() or "-"
+        self._db.upsert_session(user_id=user_id, token=token, role=role, expires_at=sess["expires_at"], tab_id=safe_tab)
         return sess
 
-    def get(self, token: str) -> dict | None:
-        sess = self._sessions.get(token)
+    def get(self, token: str, tab_id: str) -> dict | None:
+        sess = self._db.get_session_by_token(token)
         if not sess:
             return None
+        stored_tab = str(sess.get("tab_id", "")).strip()
+        req_tab = str(tab_id or "").strip()
+        wildcard = {"-", "*"}
+        if stored_tab and req_tab and stored_tab not in wildcard and req_tab not in wildcard and stored_tab != req_tab:
+            return None
         try:
-            expires_at = datetime.fromisoformat(sess["expires_at"])
+            expires_at = datetime.fromisoformat(str(sess.get("expires_at", "")))
         except Exception:
-            self._sessions.pop(token, None)
+            self._db.delete_session_by_token(token)
             return None
         if expires_at < now_utc():
-            self._sessions.pop(token, None)
+            self._db.delete_session_by_token(token)
             return None
         return sess
 
     def delete(self, token: str) -> None:
-        self._sessions.pop(token, None)
+        self._db.delete_session_by_token(token)
 
 
 def get_db(request: Request) -> SQLiteDB:
@@ -100,10 +106,12 @@ def require_user(
     creds: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
     db: Annotated[SQLiteDB, Depends(get_db)],
     sessions: Annotated[SessionStore, Depends(get_sessions)],
+    request: Request,
 ) -> AuthUser:
     if creds is None or not creds.credentials:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="未登录")
-    sess = sessions.get(creds.credentials)
+    tab_id = request.headers.get("X-HRMS-Tab", "")
+    sess = sessions.get(creds.credentials, tab_id=tab_id)
     if not sess:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="会话无效或已过期")
     user = db.find_one("users", lambda u: u.get("user_id") == sess["user_id"] and u.get("active", True))

@@ -1,25 +1,84 @@
+const _STORE = window.sessionStorage;
+
+function _getItem(key) {
+  try {
+    return _STORE.getItem(key) || "";
+  } catch (_) {
+    return "";
+  }
+}
+
+function _setItem(key, value) {
+  try {
+    _STORE.setItem(key, value);
+  } catch (_) {
+  }
+}
+
+function _removeItem(key) {
+  try {
+    _STORE.removeItem(key);
+  } catch (_) {
+  }
+}
+
+function _migrateLegacyAuthIfNeeded() {
+  try {
+    if (_getItem("token")) return;
+    const legacyToken = localStorage.getItem("token") || "";
+    if (!legacyToken) return;
+    _setItem("token", legacyToken);
+    _setItem("user_id", localStorage.getItem("user_id") || "");
+    _setItem("role", localStorage.getItem("role") || "");
+    localStorage.removeItem("token");
+    localStorage.removeItem("user_id");
+    localStorage.removeItem("role");
+  } catch (_) {
+  }
+}
+
+function _randId() {
+  try {
+    if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
+  } catch (_) {
+  }
+  return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
+function _getTabId() {
+  let id = _getItem("tab_id");
+  if (!id) {
+    id = _randId();
+    _setItem("tab_id", id);
+  }
+  return id;
+}
+
 function getToken() {
-  return localStorage.getItem("token") || "";
+  _migrateLegacyAuthIfNeeded();
+  return _getItem("token");
 }
 
 function getRole() {
-  return localStorage.getItem("role") || "";
+  _migrateLegacyAuthIfNeeded();
+  return _getItem("role");
 }
 
 function setAuth(token, userId, role) {
-  localStorage.setItem("token", token);
-  localStorage.setItem("user_id", userId);
-  localStorage.setItem("role", role);
+  _setItem("token", token);
+  _setItem("user_id", userId);
+  _setItem("role", role);
 }
 
 function clearAuth() {
-  localStorage.removeItem("token");
-  localStorage.removeItem("user_id");
-  localStorage.removeItem("role");
+  _removeItem("token");
+  _removeItem("user_id");
+  _removeItem("role");
 }
 
 async function api(path, options = {}) {
   const headers = Object.assign({}, options.headers || {});
+  headers["X-HRMS-Tab"] = _getTabId();
   const token = getToken();
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
@@ -87,7 +146,7 @@ function renderNav() {
   const left = el("div", { class: "nav-left" }, items.map(i => el("a", { href: i.href, class: "nav-link", text: i.label })));
   const right = el("div", { class: "nav-right" }, []);
   if (getToken()) {
-    right.appendChild(el("span", { class: "nav-user", text: `${localStorage.getItem("user_id") || ""} (${role || "?"})` }));
+    right.appendChild(el("span", { class: "nav-user", text: `${_getItem("user_id") || ""} (${role || "?"})` }));
     const btn = el("button", { class: "btn", type: "button", text: "退出" });
     btn.addEventListener("click", async () => {
       try {
@@ -130,7 +189,7 @@ async function ensureMe() {
     const me = await api("/auth/me");
     const token = getToken();
     if (token) {
-      setAuth(token, me.user_id || localStorage.getItem("user_id") || "", me.role || localStorage.getItem("role") || "");
+      setAuth(token, me.user_id || _getItem("user_id") || "", me.role || _getItem("role") || "");
     }
     return me;
   } catch (e) {
@@ -140,6 +199,7 @@ async function ensureMe() {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+  _getTabId();
   await ensureMe();
   renderNav();
 });
