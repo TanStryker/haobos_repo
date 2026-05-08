@@ -60,6 +60,16 @@ function validatePunchAny(rules, dt, lat, lng) {
   return { ok: false, reason: "不符合任何已配置规则：" + reasons.join("；") };
 }
 
+async function reverseGeocode(lat, lng) {
+  try {
+    const data = await request(`/geo/reverse?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`);
+    const addr = data && data.address ? String(data.address).trim() : "";
+    return addr;
+  } catch (e) {
+    return "";
+  }
+}
+
 Page({
   data: {
     userId: "",
@@ -110,12 +120,14 @@ Page({
     this.setData({ loading: true, msg: "", msgType: "hint" });
     try {
       const loc = await new Promise((resolve, reject) => {
-        wx.chooseLocation({
+        wx.getLocation({
+          type: "gcj02",
+          isHighAccuracy: true,
+          highAccuracyExpireTime: 3000,
           success: resolve,
-          fail: (err) => reject(new Error(err.errMsg || "获取位置失败"))
+          fail: (err) => reject(new Error(err.errMsg || "获取定位失败"))
         });
       });
-      const address = (loc.address || "") + (loc.name ? ` ${loc.name}` : "");
       const lat = loc.latitude;
       const lng = loc.longitude;
       const ts = nowIsoLocal();
@@ -125,6 +137,7 @@ Page({
         this.setData({ msg: `无效打卡：${v.reason}`, msgType: "error" });
         return;
       }
+      const address = (await reverseGeocode(lat, lng)) || "GPS定位";
       await request("/me/attendance/punch", {
         method: "POST",
         header: { "Content-Type": "application/json" },
@@ -132,7 +145,16 @@ Page({
       });
       this.setData({ msg: "有效打卡：已提交", msgType: "ok" });
     } catch (e) {
-      this.setData({ msg: e.message, msgType: "error" });
+      const msg = String(e && e.message ? e.message : "");
+      if (msg.includes("auth deny") || msg.includes("authorize") || msg.includes("权限") || msg.includes("拒绝")) {
+        this.setData({ msg: "定位权限未开启，请在设置中允许小程序使用定位权限", msgType: "error" });
+        try {
+          await new Promise((resolve) => wx.openSetting({ success: resolve, fail: resolve }));
+        } catch (_) {
+        }
+      } else {
+        this.setData({ msg: msg || "操作失败", msgType: "error" });
+      }
     } finally {
       this.setData({ loading: false });
     }
