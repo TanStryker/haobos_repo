@@ -1,0 +1,63 @@
+# MCP Server 基础配置
+server:
+  host: 0.0.0.0  # 监听所有网卡，便于外部访问
+  port: 8080     # MCP Server 端口
+  log_level: info
+
+# Elasticsearch 连接配置（对接你的 ES 集群）
+elasticsearch:
+  url: "http://e.es.kingdata.ksyun.com:9200"  # 你的 ES 完整 URL（HTTPS/HTTP）
+  username: "readonly"               # ES 用户名
+  password: "re2)f1MaFsa"      # ES 密码
+  verify_certs: false               # 自签名证书设为 false，生产环境改为 true
+
+# 大模型配置（对接你用于 NLU 解析的模型）
+models:
+  - id: "Gemini-2.0-Flash"            # 模型唯一 ID（自定义）
+    type: "gemini"                  # 模型类型改为 gemini
+    config:
+      api_key: "AIzaSyCzYJE_fpxYH3yDVgmzSK1q0GXHH2HXL2c"         # Gemini API 密钥
+      model_name: "gemini-2.0-flash"            # Gemini 模型名称
+      temperature: 0.1                       # 低随机性，保证解析稳定
+
+# 上下文协议模板（适配硬件运维场景）
+templates:
+  - id: "hw-ops-context-template"   # 模板 ID
+    name: "硬件运维上下文模板"
+    description: "用于硬件运维数据检索的上下文协议模板"
+    # 上下文协议结构模板（与你之前定义的 HWContextProtocol 对齐）
+    schema:
+      type: object
+      properties:
+        metadata:
+          type: object
+          properties:
+            context_id: {type: string}
+            timestamp: {type: integer}
+            version: {type: string, default: "1.0"}
+            user_id: {type: string}
+            user_text: {type: string}
+            status: {type: string, default: "initial"}
+        retrieval:
+          type: object
+          properties:
+            es_index: {type: string, default: "hardware_operation_metrics"}
+            query: {type: object}
+            fields: {type: array, items: {type: string}}
+            size: {type: integer, default: 10000}
+        analysis:
+          type: object
+          properties:
+            dimensions: {type: array, items: {type: string}}
+            type: {type: string}
+            result: {type: object}
+        optimization:
+          type: object
+          properties:
+            warnings: {type: array, items: {type: string}}
+            suggestions: {type: array, items: {type: string}}
+      required: ["metadata", "retrieval", "analysis", "optimization"]
+
+# 权限控制（基础配置，生产环境可扩展）
+auth:
+  enabled: false  # 先关闭，测试通过后可开启 API Key 认证

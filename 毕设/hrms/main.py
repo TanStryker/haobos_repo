@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from hrms.core.auth import SessionStore, ensure_default_admin
 from hrms.core.oplog import append_oplog
-from hrms.storage.json_db import JsonDB
+from hrms.storage.json_db import JsonDB, SQLiteDB
 from hrms.modules.auth_routes import router as auth_router
 from hrms.modules.employees_routes import router as employees_router
 from hrms.modules.overtime_routes import router as overtime_router
@@ -34,12 +34,53 @@ def create_app() -> FastAPI:
     log_dir = os.path.join(os.path.dirname(base_dir), "logs")
     ui_dir = os.path.join(os.path.dirname(base_dir), "ui")
 
-    db = JsonDB(data_dir)
+    db_url = os.getenv("HRMS_DB_URL", "").strip()
+    if not db_url:
+        db_url = os.path.join(data_dir, "hrms.db")
+    if db_url.lower().startswith("sqlite:///"):
+        db_path = db_url[len("sqlite:///") :]
+        db = SQLiteDB(db_path)
+    else:
+        db = SQLiteDB(db_url)
+
+    def _maybe_import_json():
+        try:
+            src = JsonDB(data_dir)
+            tables = [
+                "users",
+                "employees",
+                "attendance_rules",
+                "attendance_records",
+                "overtime_requests",
+                "salary_records",
+                "system_config",
+                "employee_change_requests",
+                "employee_change_history",
+                "attendance_manual_overrides",
+            ]
+            for t in tables:
+                if db.read_all(t):
+                    continue
+                rows = src.read_all(t)
+                for r in rows:
+                    if isinstance(r, dict):
+                        db.insert(t, r)
+        except Exception:
+            pass
+
+    _maybe_import_json()
     ensure_default_admin(db)
 
     app.state.db = db
     app.state.sessions = SessionStore()
     app.state.log_dir = log_dir
+
+    @app.on_event("shutdown")
+    def _close_db():
+        try:
+            db.close()
+        except Exception:
+            pass
 
     @app.middleware("http")
     async def oplog_middleware(request: Request, call_next):

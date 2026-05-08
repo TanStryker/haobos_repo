@@ -1,0 +1,200 @@
+digraph ER {
+  graph [rankdir=LR, splines=ortho, nodesep=0.6, ranksep=1.0, fontname="Microsoft YaHei"];
+  node  [fontname="Microsoft YaHei"];
+  edge  [fontname="Microsoft YaHei"];
+
+  // ===== Entities (rectangles) =====
+  User      [shape=box, label="用户(UserAccount)"];
+  Employee  [shape=box, label="员工(Employee)"];
+  WorkType  [shape=box, label="人员类型(WorkType)"];
+  Rule      [shape=box, label="考勤规则(AttendanceRule)"];
+  Geofence  [shape=box, label="地理围栏(Geofence)"];
+  Punch     [shape=box, label="打卡记录(PunchRecord)"];
+  Overtime  [shape=box, label="加班申请(OvertimeRequest)"];
+  Salary    [shape=box, label="薪资快照(SalarySnapshot)"];
+  ChangeReq [shape=box, label="信息修改申请(ChangeRequest)"];
+  Audit     [shape=box, label="员工审计(Audit)"];
+  Config    [shape=box, label="系统配置(SystemConfig)"];
+
+  // ===== Relationships (diamonds) =====
+  R_bind         [shape=diamond, label="绑定"];
+  R_classify     [shape=diamond, label="归类"];
+  R_apply        [shape=diamond, label="适用"];
+  R_hasFence     [shape=diamond, label="包含"];
+  R_punch        [shape=diamond, label="打卡"];
+  R_matchRule    [shape=diamond, label="命中规则"];
+  R_submitOT     [shape=diamond, label="提交加班"];
+  R_decideOT     [shape=diamond, label="审批加班"];
+  R_calcSalary   [shape=diamond, label="核算薪资"];
+  R_submitCR     [shape=diamond, label="提交修改申请"];
+  R_decideCR     [shape=diamond, label="审批修改申请"];
+  R_auditBy      [shape=diamond, label="记录变更"];
+  R_updateRule   [shape=diamond, label="维护规则"];
+  R_updateConfig [shape=diamond, label="维护配置"];
+
+  // ===== Attributes (ovals) =====
+  // User attributes
+  U_id     [shape=ellipse, label="user_id (PK)"];
+  U_login  [shape=ellipse, label="login_name (UK)"];
+  U_pwd    [shape=ellipse, label="password_hash"];
+  U_role   [shape=ellipse, label="role"];
+  U_active [shape=ellipse, label="active"];
+
+  U_id -> User; U_login -> User; U_pwd -> User; U_role -> User; U_active -> User;
+
+  // Employee attributes
+  E_id     [shape=ellipse, label="employee_id (PK)"];
+  E_no     [shape=ellipse, label="employee_no (UK)"];
+  E_name   [shape=ellipse, label="name"];
+  E_dept   [shape=ellipse, label="department"];
+  E_pos    [shape=ellipse, label="position"];
+  E_salary [shape=ellipse, label="daily_salary"];
+  E_active [shape=ellipse, label="active"];
+
+  E_id -> Employee; E_no -> Employee; E_name -> Employee; E_dept -> Employee;
+  E_pos -> Employee; E_salary -> Employee; E_active -> Employee;
+
+  // WorkType attributes
+  WT_id   [shape=ellipse, label="work_type_id (PK)"];
+  WT_code [shape=ellipse, label="code(onsite/offsite) (UK)"];
+  WT_name [shape=ellipse, label="name"];
+
+  WT_id -> WorkType; WT_code -> WorkType; WT_name -> WorkType;
+
+  // Rule attributes
+  R_id     [shape=ellipse, label="rule_id (PK)"];
+  R_name   [shape=ellipse, label="rule_name"];
+  R_en     [shape=ellipse, label="enabled"];
+  R_pri    [shape=ellipse, label="priority"];
+  R_t1     [shape=ellipse, label="start_time(HH:MM)"];
+  R_t2     [shape=ellipse, label="end_time(HH:MM)"];
+
+  R_id -> Rule; R_name -> Rule; R_en -> Rule; R_pri -> Rule; R_t1 -> Rule; R_t2 -> Rule;
+
+  // Geofence attributes
+  G_id   [shape=ellipse, label="geofence_id (PK)"];
+  G_lat  [shape=ellipse, label="center_lat"];
+  G_lng  [shape=ellipse, label="center_lng"];
+  G_rad  [shape=ellipse, label="radius_m"];
+  G_hint [shape=ellipse, label="address_hint"];
+
+  G_id -> Geofence; G_lat -> Geofence; G_lng -> Geofence; G_rad -> Geofence; G_hint -> Geofence;
+
+  // Punch attributes
+  P_id     [shape=ellipse, label="punch_id (PK)"];
+  P_time   [shape=ellipse, label="punch_time"];
+  P_addr   [shape=ellipse, label="address_text"];
+  P_lat    [shape=ellipse, label="lat"];
+  P_lng    [shape=ellipse, label="lng"];
+  P_src    [shape=ellipse, label="source"];
+  P_valid  [shape=ellipse, label="is_valid"];
+  P_reason [shape=ellipse, label="invalid_reason"];
+
+  P_id -> Punch; P_time -> Punch; P_addr -> Punch; P_lat -> Punch; P_lng -> Punch;
+  P_src -> Punch; P_valid -> Punch; P_reason -> Punch;
+
+  // Overtime attributes
+  OT_id   [shape=ellipse, label="overtime_id (PK)"];
+  OT_day  [shape=ellipse, label="overtime_date"];
+  OT_days [shape=ellipse, label="days"];
+  OT_rs   [shape=ellipse, label="reason"];
+  OT_st   [shape=ellipse, label="status"];
+  OT_rej  [shape=ellipse, label="rejected_reason"];
+
+  OT_id -> Overtime; OT_day -> Overtime; OT_days -> Overtime; OT_rs -> Overtime;
+  OT_st -> Overtime; OT_rej -> Overtime;
+
+  // Salary attributes
+  S_id     [shape=ellipse, label="salary_id (PK)"];
+  S_month  [shape=ellipse, label="month"];
+  S_att    [shape=ellipse, label="attendance_days"];
+  S_ot     [shape=ellipse, label="overtime_days"];
+  S_daily  [shape=ellipse, label="daily_salary"];
+  S_total  [shape=ellipse, label="total_salary"];
+
+  S_id -> Salary; S_month -> Salary; S_att -> Salary; S_ot -> Salary; S_daily -> Salary; S_total -> Salary;
+
+  // ChangeReq attributes
+  CR_id    [shape=ellipse, label="request_id (PK)"];
+  CR_field [shape=ellipse, label="field_name"];
+  CR_new   [shape=ellipse, label="new_value"];
+  CR_rs    [shape=ellipse, label="reason"];
+  CR_st    [shape=ellipse, label="status"];
+  CR_rej   [shape=ellipse, label="rejected_reason"];
+
+  CR_id -> ChangeReq; CR_field -> ChangeReq; CR_new -> ChangeReq; CR_rs -> ChangeReq; CR_st -> ChangeReq; CR_rej -> ChangeReq;
+
+  // Audit attributes
+  A_id    [shape=ellipse, label="audit_id (PK)"];
+  A_time  [shape=ellipse, label="changed_at"];
+  A_src   [shape=ellipse, label="change_source"];
+  A_field [shape=ellipse, label="field_name"];
+  A_old   [shape=ellipse, label="old_value"];
+  A_new   [shape=ellipse, label="new_value"];
+
+  A_id -> Audit; A_time -> Audit; A_src -> Audit; A_field -> Audit; A_old -> Audit; A_new -> Audit;
+
+  // Config attributes
+  C_key [shape=ellipse, label="config_key (PK)"];
+  C_val [shape=ellipse, label="config_value"];
+  C_key -> Config; C_val -> Config;
+
+  // ===== Relationships wiring + cardinalities =====
+  // User 1 -- binds -- 0..1 Employee
+  User     -> R_bind    [label="1"];
+  Employee -> R_bind    [label="0..1"];
+
+  // WorkType 1 -- classify -- N Employee
+  WorkType -> R_classify [label="1"];
+  Employee -> R_classify [label="N"];
+
+  // WorkType 1 -- apply -- N Rule
+  WorkType -> R_apply    [label="1"];
+  Rule     -> R_apply    [label="N"];
+
+  // Rule 1 -- hasFence -- 0..N Geofence
+  Rule     -> R_hasFence [label="1"];
+  Geofence -> R_hasFence [label="0..N"];
+
+  // Employee 1 -- punch -- 0..N Punch
+  Employee -> R_punch [label="1"];
+  Punch    -> R_punch [label="0..N"];
+
+  // Rule 1 -- matchRule -- 0..N Punch ; Punch 0..1 matches a Rule
+  Rule  -> R_matchRule [label="1"];
+  Punch -> R_matchRule [label="0..1"];
+
+  // Employee 1 -- submitOT -- 0..N Overtime
+  Employee -> R_submitOT [label="1"];
+  Overtime  -> R_submitOT [label="0..N"];
+
+  // User 0..N -- decideOT -- 0..N Overtime (一次申请最多被一个人审批，这里用 0..1 更严格)
+  User     -> R_decideOT [label="0..N"];
+  Overtime -> R_decideOT [label="0..1"];
+
+  // User 0..N -- calcSalary -- 0..N Salary ; Employee 1 -- has -- 0..N Salary
+  User     -> R_calcSalary [label="0..N"];
+  Salary   -> R_calcSalary [label="0..N"];
+  Employee -> Salary       [style=dashed, label="1 : 0..N"];
+
+  // Employee 1 -- submitCR -- 0..N ChangeReq
+  Employee  -> R_submitCR [label="1"];
+  ChangeReq -> R_submitCR [label="0..N"];
+
+  // User 0..N -- decideCR -- 0..1 ChangeReq
+  User      -> R_decideCR [label="0..N"];
+  ChangeReq -> R_decideCR [label="0..1"];
+
+  // User 0..N -- auditBy -- 0..N Audit ; Employee 1 -- audited -- 0..N Audit
+  User     -> R_auditBy [label="0..N"];
+  Audit    -> R_auditBy [label="0..N"];
+  Employee -> Audit     [style=dashed, label="1 : 0..N"];
+
+  // User 0..N -- updateRule -- 0..N Rule
+  User -> R_updateRule [label="0..N"];
+  Rule -> R_updateRule [label="0..N"];
+
+  // User 0..N -- updateConfig -- 0..N Config
+  User   -> R_updateConfig [label="0..N"];
+  Config -> R_updateConfig [label="0..N"];
+}

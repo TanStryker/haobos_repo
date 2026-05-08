@@ -361,6 +361,20 @@ def _build_mode1_output_filename(fetch_ern: bool, fetch_eds: bool, specified_tim
     return _safe_filename(base) + ".xlsx"
 
 
+def _unique_output_path(path: str) -> str:
+    if not path:
+        return path
+    base, ext = os.path.splitext(path)
+    if not os.path.exists(path):
+        return path
+    i = 1
+    while True:
+        cand = f"{base}（{i}）{ext}"
+        if not os.path.exists(cand):
+            return cand
+        i += 1
+
+
 def _get_program_5min_series(es, index_pattern, channel, program_name, day_date):
     start_time = day_date
     end_time = day_date + timedelta(days=1) - timedelta(seconds=1)
@@ -886,9 +900,12 @@ def scan_early_peak_channels(es, start_date, end_date, output_dir: str, scan_mod
     scan_mode:
       - "early_peak": 查找 95 峰值在 08:00-17:00 的渠道（按 ISP + 渠道汇总）
       - "offline_before_evening": 查找晚高峰前离线渠道（按渠道汇总），并展示该渠道的日 95 峰值与峰值时刻
+      - "precise_shift": 精准查询错峰渠道：若(95峰值 - 大盘计费时刻带宽) > 1G，标注为错峰渠道
     """
     if scan_mode == "offline_before_evening":
         print(f"\n🚀 开始扫描 {start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')} 晚高峰前离线渠道...")
+    elif scan_mode == "precise_shift":
+        print(f"\n🚀 开始扫描 {start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')} 精准查询错峰渠道(差值>1G)...")
     else:
         print(f"\n🚀 开始扫描 {start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')} 期间所有渠道和运营商的95峰值...")
     
@@ -898,6 +915,14 @@ def scan_early_peak_channels(es, start_date, end_date, output_dir: str, scan_mod
     while current_date <= end_date:
         day_str = current_date.strftime('%Y-%m-%d')
         print(f"\nProcessing {day_str}...")
+
+        api_time_str = None
+        if scan_mode == "precise_shift":
+            api_time_str = get_billing_time_from_api(current_date)
+            if not api_time_str:
+                print(f"⚠️ {day_str} 未获取到接口计费时间，跳过当天精准错峰扫描")
+                current_date += timedelta(days=1)
+                continue
         
         curr_index = f"eds_billing-{current_date.strftime('%Y%m%d')}"
         prev_date = current_date - timedelta(days=1)
@@ -975,7 +1000,7 @@ def scan_early_peak_channels(es, start_date, end_date, output_dir: str, scan_mod
                 isp_name = isp_bucket["key"]
                 buckets = isp_bucket.get("by_5min", {}).get("buckets", [])
                 
-                if scan_mode == "offline_before_evening":
+                if scan_mode in {"offline_before_evening", "precise_shift"}:
                     for bucket in buckets:
                         sum_up_flow = bucket.get("total_up_flow", {}).get("value", 0)
                         ts_ms = bucket.get("key")
@@ -1040,7 +1065,10 @@ def scan_early_peak_channels(es, start_date, end_date, output_dir: str, scan_mod
             # Calculate Channel Total 95 peak
             ch_data_points = []
             for ts, total_flow in ch_total_points.items():
-                ch_data_points.append({"timestamp": ts, "bandwidth": (total_flow * 8) / 300 / 1_000_000_000})
+                if scan_mode == "precise_shift":
+                    ch_data_points.append({"timestamp": ts, "bandwidth": (total_flow * 8) / 300 / 1024 / 1_000_000})
+                else:
+                    ch_data_points.append({"timestamp": ts, "bandwidth": (total_flow * 8) / 300 / 1_000_000_000})
             
             sorted_ch = sorted(ch_data_points, key=lambda x: x["bandwidth"], reverse=True)
             if sorted_ch:
@@ -1050,6 +1078,28 @@ def scan_early_peak_channels(es, start_date, end_date, output_dir: str, scan_mod
                 if idx_ch >= len(sorted_ch): idx_ch = len(sorted_ch) - 1
                 
                 target_ch = sorted_ch[idx_ch]
+
+                if scan_mode == "precise_shift":
+                    billing_bw = None
+                    for p in ch_data_points:
+                        if p["timestamp"].strftime("%H:%M") == api_time_str:
+                            billing_bw = p["bandwidth"]
+                            break
+                    if billing_bw is None:
+                        continue
+                    diff_bw = target_ch["bandwidth"] - billing_bw
+                    if diff_bw > 1.0:
+                        target_records.append({
+                            "日期": day_str,
+                            "渠道ID": channel_name,
+                            "日95峰值": target_ch["bandwidth"],
+                            "峰值时刻": target_ch["timestamp"].strftime("%H:%M"),
+                            "大盘计费时刻": api_time_str,
+                            "大盘时刻带宽": billing_bw,
+                            "错峰带宽差": diff_bw,
+                        })
+                    continue
+
                 up_speeds = speed_cache_for_day.get(channel_name)
                 if up_speeds is None:
                     up_speeds = get_total_up_speed_gb_at_times(es, current_date, channel_name, ["00:00", "10:00", "19:00"])
@@ -1105,6 +1155,15 @@ def scan_early_peak_channels(es, start_date, end_date, output_dir: str, scan_mod
                 output_dir,
                 _safe_filename(f"晚高峰前离线渠道汇总_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}") + ".xlsx",
             )
+            output_file = _unique_output_path(output_file)
+        elif scan_mode == "precise_shift":
+            df = df[["日期", "渠道ID", "日95峰值", "峰值时刻", "大盘计费时刻", "大盘时刻带宽", "错峰带宽差"]]
+            df = _clean_df_for_excel(df)
+            output_file = os.path.join(
+                output_dir,
+                _safe_filename(f"精准查询错峰渠道汇总_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}") + ".xlsx",
+            )
+            output_file = _unique_output_path(output_file)
         else:
             df = df[["时间戳", "维度", "运营商", "上行带宽", "渠道ID", "00:00_total_up_speed(Gb)", "10:00_total_up_speed(Gb)", "19:00_total_up_speed(Gb)", "00-19差值(Gb)", "阈值(10:00*5%)(Gb)", "错峰原因"]]
             df = _clean_df_for_excel(df)
@@ -1112,6 +1171,7 @@ def scan_early_peak_channels(es, start_date, end_date, output_dir: str, scan_mod
                 output_dir,
                 _safe_filename(f"8点-17点峰值汇总_综合_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}") + ".xlsx",
             )
+            output_file = _unique_output_path(output_file)
         try:
             df.to_excel(output_file, index=False)
             print(f"\n✅ 结果已保存至: {output_file}")
@@ -1140,8 +1200,14 @@ def main():
         print("\n功能2查询类型:")
         print("1. 查找95峰值在08:00-17:00的渠道")
         print("2. 查找晚高峰前离线的渠道")
-        scan_choice = input("请选择 (1/2, 默认1): ").strip()
-        scan_mode = "offline_before_evening" if scan_choice == "2" else "early_peak"
+        print("3. 精准查询错峰渠道(大盘计费时刻差值>1G)")
+        scan_choice = input("请选择 (1/2/3, 默认1): ").strip()
+        if scan_choice == "2":
+            scan_mode = "offline_before_evening"
+        elif scan_choice == "3":
+            scan_mode = "precise_shift"
+        else:
+            scan_mode = "early_peak"
         start_date_str = input("请输入开始日期 (YYYY-MM-DD): ").strip()
         end_date_str = input("请输入结束日期 (YYYY-MM-DD): ").strip()
         
@@ -1479,6 +1545,7 @@ def main():
             output_dir,
             _build_mode1_output_filename(fetch_ern, fetch_eds, specified_time_str, start_date_str, end_date_str),
         )
+        output_file = _unique_output_path(output_file)
         try:
             with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
                 used_sheet_names = set()
