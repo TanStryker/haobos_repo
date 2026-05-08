@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from hrms.core.auth import AuthUser, get_db, require_admin, require_user
-from hrms.storage.json_db import JsonDB, now_iso
+from hrms.storage.sqlite_db import SQLiteDB, now_iso
 
 
 router = APIRouter(tags=["employees"])
@@ -78,7 +78,7 @@ def _calc_attendance_days_for_month(records: list[dict]) -> dict[str, float]:
 @router.get("/admin/employees")
 def admin_list_employees(
     admin: Annotated[AuthUser, Depends(require_admin)],
-    db: Annotated[JsonDB, Depends(get_db)],
+    db: Annotated[SQLiteDB, Depends(get_db)],
     q: str | None = Query(default=None),
 ):
     rows = db.read_all("employees")
@@ -111,7 +111,7 @@ def admin_list_employees(
 def admin_create_employee(
     payload: EmployeeCreate,
     admin: Annotated[AuthUser, Depends(require_admin)],
-    db: Annotated[JsonDB, Depends(get_db)],
+    db: Annotated[SQLiteDB, Depends(get_db)],
 ):
     exists = db.find_one("employees", lambda e: e.get("employee_id") == payload.employee_id)
     if exists:
@@ -149,7 +149,7 @@ def admin_create_employee(
 def admin_get_employee_detail(
     employee_id: str,
     admin: Annotated[AuthUser, Depends(require_admin)],
-    db: Annotated[JsonDB, Depends(get_db)],
+    db: Annotated[SQLiteDB, Depends(get_db)],
 ):
     emp = db.find_one("employees", lambda e: e.get("employee_id") == employee_id)
     if not emp:
@@ -173,7 +173,7 @@ def admin_update_employee(
     employee_id: str,
     payload: EmployeeUpdate,
     admin: Annotated[AuthUser, Depends(require_admin)],
-    db: Annotated[JsonDB, Depends(get_db)],
+    db: Annotated[SQLiteDB, Depends(get_db)],
 ):
     before = db.find_one("employees", lambda e: e.get("employee_id") == employee_id)
     if not before:
@@ -215,7 +215,7 @@ def admin_delete_employee(
     employee_id: str,
     confirm: bool = Query(default=False),
     admin: Annotated[AuthUser, Depends(require_admin)] = None,
-    db: Annotated[JsonDB, Depends(get_db)] = None,
+    db: Annotated[SQLiteDB, Depends(get_db)] = None,
 ):
     if not confirm:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="需要确认删除")
@@ -241,7 +241,7 @@ def admin_delete_employee(
 
 
 @router.get("/me/employee")
-def employee_me(user: Annotated[AuthUser, Depends(require_user)], db: Annotated[JsonDB, Depends(get_db)]):
+def employee_me(user: Annotated[AuthUser, Depends(require_user)], db: Annotated[SQLiteDB, Depends(get_db)]):
     emp = db.find_one("employees", lambda e: e.get("employee_id") == user.user_id)
     if not emp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="员工信息不存在")
@@ -272,7 +272,7 @@ class ChangeRequestCreate(BaseModel):
 def employee_create_change_request(
     payload: ChangeRequestCreate,
     user: Annotated[AuthUser, Depends(require_user)],
-    db: Annotated[JsonDB, Depends(get_db)],
+    db: Annotated[SQLiteDB, Depends(get_db)],
 ):
     emp = db.find_one("employees", lambda e: e.get("employee_id") == user.user_id and e.get("active", True))
     if not emp:
@@ -295,7 +295,7 @@ def employee_create_change_request(
 
 
 @router.get("/me/change-requests")
-def employee_list_change_requests(user: Annotated[AuthUser, Depends(require_user)], db: Annotated[JsonDB, Depends(get_db)]):
+def employee_list_change_requests(user: Annotated[AuthUser, Depends(require_user)], db: Annotated[SQLiteDB, Depends(get_db)]):
     items = db.find_many("employee_change_requests", lambda r: r.get("employee_id") == user.user_id)
     items.sort(key=lambda r: r.get("created_at", ""), reverse=True)
     return {"items": items}
@@ -304,7 +304,7 @@ def employee_list_change_requests(user: Annotated[AuthUser, Depends(require_user
 @router.get("/admin/change-requests")
 def admin_list_change_requests(
     admin: Annotated[AuthUser, Depends(require_admin)],
-    db: Annotated[JsonDB, Depends(get_db)],
+    db: Annotated[SQLiteDB, Depends(get_db)],
     status_filter: str | None = Query(default=None, alias="status"),
 ):
     items = db.read_all("employee_change_requests")
@@ -322,7 +322,7 @@ class RejectIn(BaseModel):
 def admin_approve_change_request(
     request_id: str,
     admin: Annotated[AuthUser, Depends(require_admin)],
-    db: Annotated[JsonDB, Depends(get_db)],
+    db: Annotated[SQLiteDB, Depends(get_db)],
 ):
     req = db.find_one("employee_change_requests", lambda r: r.get("id") == request_id)
     if not req:
@@ -389,7 +389,7 @@ def admin_reject_change_request(
     request_id: str,
     payload: RejectIn,
     admin: Annotated[AuthUser, Depends(require_admin)],
-    db: Annotated[JsonDB, Depends(get_db)],
+    db: Annotated[SQLiteDB, Depends(get_db)],
 ):
     req = db.find_one("employee_change_requests", lambda r: r.get("id") == request_id)
     if not req:

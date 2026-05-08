@@ -2,6 +2,13 @@
 __pycache__/
 *.py[cod]
 *$py.class
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
+*.wal
+*.shm
+毕设/logs/*.jsonl
 .vscode/
 .idea/
 .DS_Store

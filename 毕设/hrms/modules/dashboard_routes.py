@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 
 from hrms.core.auth import AuthUser, get_db, require_user
-from hrms.storage.json_db import JsonDB
+from hrms.storage.sqlite_db import SQLiteDB
 
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -20,7 +20,7 @@ def _workflow_step(status: str) -> str:
 
 
 @router.get("/summary")
-def get_dashboard_summary(user: Annotated[AuthUser, Depends(require_user)], db: Annotated[JsonDB, Depends(get_db)]):
+def get_dashboard_summary(user: Annotated[AuthUser, Depends(require_user)], db: Annotated[SQLiteDB, Depends(get_db)]):
     if user.role == "admin":
         pending_change = db.find_many("employee_change_requests", lambda r: r.get("status") == "pending")
         pending_overtime = db.find_many("overtime_requests", lambda r: r.get("status") == "pending")

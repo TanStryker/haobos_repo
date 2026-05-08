@@ -7,13 +7,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 
 from hrms.core.auth import AuthUser, get_db, require_admin, require_user
-from hrms.storage.json_db import JsonDB, now_iso
+from hrms.storage.sqlite_db import SQLiteDB, now_iso
 
 
 router = APIRouter(tags=["salary"])
 
 
-def _attendance_days(db: JsonDB, employee_id: str, month: str) -> float:
+def _attendance_days(db: SQLiteDB, employee_id: str, month: str) -> float:
     records = db.find_many(
         "attendance_records",
         lambda r: r.get("employee_id") == employee_id and str(r.get("ts", "")).startswith(month) and r.get("status") == "present",
@@ -26,7 +26,7 @@ def _attendance_days(db: JsonDB, employee_id: str, month: str) -> float:
     return float(len(days))
 
 
-def _overtime_days(db: JsonDB, employee_id: str, month: str) -> float:
+def _overtime_days(db: SQLiteDB, employee_id: str, month: str) -> float:
     records = db.find_many(
         "overtime_requests",
         lambda r: r.get("employee_id") == employee_id and r.get("status") == "approved" and str(r.get("date", "")).startswith(month),
@@ -37,7 +37,7 @@ def _overtime_days(db: JsonDB, employee_id: str, month: str) -> float:
     return total
 
 
-def _calc_salary(db: JsonDB, employee: dict, month: str) -> dict:
+def _calc_salary(db: SQLiteDB, employee: dict, month: str) -> dict:
     emp_id = str(employee.get("employee_id", ""))
     daily_salary = float(employee.get("daily_salary", 0) or 0)
     attendance_days = _attendance_days(db, emp_id, month)
@@ -54,7 +54,7 @@ def _calc_salary(db: JsonDB, employee: dict, month: str) -> dict:
     }
 
 
-def _upsert_salary(db: JsonDB, record: dict) -> dict:
+def _upsert_salary(db: SQLiteDB, record: dict) -> dict:
     existing = db.find_one("salary_records", lambda r: r.get("employee_id") == record["employee_id"] and r.get("month") == record["month"])
     if not existing:
         db.insert("salary_records", record)
@@ -77,7 +77,7 @@ def _upsert_salary(db: JsonDB, record: dict) -> dict:
 def admin_list_salaries(
     month: str,
     admin: Annotated[AuthUser, Depends(require_admin)],
-    db: Annotated[JsonDB, Depends(get_db)],
+    db: Annotated[SQLiteDB, Depends(get_db)],
 ):
     items = db.find_many("salary_records", lambda r: r.get("month") == month)
     items.sort(key=lambda r: r.get("employee_id", ""))
@@ -88,7 +88,7 @@ def admin_list_salaries(
 def admin_calculate_salaries(
     month: str,
     admin: Annotated[AuthUser, Depends(require_admin)],
-    db: Annotated[JsonDB, Depends(get_db)],
+    db: Annotated[SQLiteDB, Depends(get_db)],
     employee_id: str | None = Query(default=None),
 ):
     employees = db.read_all("employees")
@@ -116,7 +116,7 @@ def admin_adjust_salary_inputs(
     payload: SalaryAdjustIn,
     month: str,
     admin: Annotated[AuthUser, Depends(require_admin)],
-    db: Annotated[JsonDB, Depends(get_db)],
+    db: Annotated[SQLiteDB, Depends(get_db)],
 ):
     emp = db.find_one("employees", lambda e: e.get("employee_id") == employee_id)
     if not emp:
@@ -156,7 +156,7 @@ def admin_adjust_salary_inputs(
 def admin_export_salaries(
     month: str,
     admin: Annotated[AuthUser, Depends(require_admin)],
-    db: Annotated[JsonDB, Depends(get_db)],
+    db: Annotated[SQLiteDB, Depends(get_db)],
 ):
     items = db.find_many("salary_records", lambda r: r.get("month") == month)
     items.sort(key=lambda r: r.get("employee_id", ""))
@@ -182,7 +182,7 @@ def admin_export_salaries(
 def employee_salary(
     month: str,
     user: Annotated[AuthUser, Depends(require_user)],
-    db: Annotated[JsonDB, Depends(get_db)],
+    db: Annotated[SQLiteDB, Depends(get_db)],
 ):
     rec = db.find_one("salary_records", lambda r: r.get("employee_id") == user.user_id and r.get("month") == month)
     if not rec:
@@ -194,7 +194,7 @@ def employee_salary(
 
 
 @router.get("/me/salary/history")
-def employee_salary_history(user: Annotated[AuthUser, Depends(require_user)], db: Annotated[JsonDB, Depends(get_db)]):
+def employee_salary_history(user: Annotated[AuthUser, Depends(require_user)], db: Annotated[SQLiteDB, Depends(get_db)]):
     items = db.find_many("salary_records", lambda r: r.get("employee_id") == user.user_id)
     items.sort(key=lambda r: r.get("month", ""), reverse=True)
     return {"items": items}

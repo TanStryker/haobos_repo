@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from hrms.core.auth import AuthUser, get_db, require_admin, require_user
-from hrms.storage.json_db import JsonDB, now_iso
+from hrms.storage.sqlite_db import SQLiteDB, now_iso
 
 
 router = APIRouter(tags=["overtime"])
@@ -21,7 +21,7 @@ class OvertimeCreate(BaseModel):
 def employee_submit_overtime(
     payload: OvertimeCreate,
     user: Annotated[AuthUser, Depends(require_user)],
-    db: Annotated[JsonDB, Depends(get_db)],
+    db: Annotated[SQLiteDB, Depends(get_db)],
 ):
     emp = db.find_one("employees", lambda e: e.get("employee_id") == user.user_id and e.get("active", True))
     if not emp:
@@ -44,14 +44,14 @@ def employee_submit_overtime(
 
 
 @router.get("/me/overtime")
-def employee_list_overtime(user: Annotated[AuthUser, Depends(require_user)], db: Annotated[JsonDB, Depends(get_db)]):
+def employee_list_overtime(user: Annotated[AuthUser, Depends(require_user)], db: Annotated[SQLiteDB, Depends(get_db)]):
     items = db.find_many("overtime_requests", lambda r: r.get("employee_id") == user.user_id)
     items.sort(key=lambda r: r.get("created_at", ""), reverse=True)
     return {"items": items}
 
 
 @router.get("/admin/overtime/pending")
-def admin_list_pending_overtime(admin: Annotated[AuthUser, Depends(require_admin)], db: Annotated[JsonDB, Depends(get_db)]):
+def admin_list_pending_overtime(admin: Annotated[AuthUser, Depends(require_admin)], db: Annotated[SQLiteDB, Depends(get_db)]):
     items = db.find_many("overtime_requests", lambda r: r.get("status") == "pending")
     items.sort(key=lambda r: r.get("created_at", ""), reverse=True)
     return {"items": items}
@@ -65,7 +65,7 @@ class RejectIn(BaseModel):
 def admin_approve_overtime(
     request_id: str,
     admin: Annotated[AuthUser, Depends(require_admin)],
-    db: Annotated[JsonDB, Depends(get_db)],
+    db: Annotated[SQLiteDB, Depends(get_db)],
 ):
     req = db.find_one("overtime_requests", lambda r: r.get("id") == request_id)
     if not req:
@@ -89,7 +89,7 @@ def admin_reject_overtime(
     request_id: str,
     payload: RejectIn,
     admin: Annotated[AuthUser, Depends(require_admin)],
-    db: Annotated[JsonDB, Depends(get_db)],
+    db: Annotated[SQLiteDB, Depends(get_db)],
 ):
     req = db.find_one("overtime_requests", lambda r: r.get("id") == request_id)
     if not req:
@@ -112,7 +112,7 @@ def admin_reject_overtime(
 @router.get("/admin/overtime/records")
 def admin_list_overtime_records(
     admin: Annotated[AuthUser, Depends(require_admin)],
-    db: Annotated[JsonDB, Depends(get_db)],
+    db: Annotated[SQLiteDB, Depends(get_db)],
     status_filter: str | None = Query(default=None, alias="status"),
 ):
     items = db.read_all("overtime_requests")
@@ -126,7 +126,7 @@ def admin_list_overtime_records(
 def admin_overtime_stats(
     month: str,
     admin: Annotated[AuthUser, Depends(require_admin)],
-    db: Annotated[JsonDB, Depends(get_db)],
+    db: Annotated[SQLiteDB, Depends(get_db)],
 ):
     approved = db.find_many(
         "overtime_requests",
