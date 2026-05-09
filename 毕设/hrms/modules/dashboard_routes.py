@@ -18,6 +18,13 @@ def _workflow_step(status: str) -> str:
         return "已驳回"
     return status or "未知"
 
+def _overtime_range_label(r: dict) -> str:
+    sd = str(r.get("start_date") or r.get("date") or "")
+    ed = str(r.get("end_date") or sd or "")
+    if sd and ed and sd != ed:
+        return f"{sd}~{ed}"
+    return sd
+
 
 @router.get("/overview")
 def get_dashboard_overview(user: Annotated[AuthUser, Depends(require_user)], db: Annotated[SQLiteDB, Depends(get_db)]):
@@ -113,7 +120,7 @@ def get_dashboard_summary(user: Annotated[AuthUser, Depends(require_user)], db: 
                     "created_at": r.get("created_at", ""),
                     "status": r.get("status", ""),
                     "step": _workflow_step(r.get("status", "")),
-                    "summary": f"{r.get('date', '')} {r.get('days', '')}天",
+                    "summary": f"{_overtime_range_label(r)} {r.get('days', '')}天",
                     "link": "/ui/employee_overtime.html",
                 }
             )
@@ -143,7 +150,7 @@ def get_dashboard_summary(user: Annotated[AuthUser, Depends(require_user)], db: 
                 "created_at": r.get("created_at", ""),
                 "status": r.get("status", ""),
                 "step": _workflow_step(r.get("status", "")),
-                "summary": f"{r.get('date', '')} {r.get('days', '')}天",
+                "summary": f"{_overtime_range_label(r)} {r.get('days', '')}天",
                 "result": r.get("rejected_reason", "") if r.get("status") == "rejected" else "",
                 "link": "/ui/employee_overtime.html",
             }

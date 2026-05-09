@@ -76,6 +76,8 @@ class SQLiteDB:
             overtime_id INTEGER PRIMARY KEY AUTOINCREMENT,
             ext_id TEXT NOT NULL UNIQUE,
             emp_id TEXT NOT NULL,
+            start_date TEXT NOT NULL DEFAULT '',
+            end_date TEXT NOT NULL DEFAULT '',
             days REAL NOT NULL DEFAULT 0.0 CHECK (days >= 0),
             reason TEXT NOT NULL,
             apply_time TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -222,6 +224,11 @@ class SQLiteDB:
         """
         with self._lock:
             self._conn.executescript(ddl)
+            cols = {str(r["name"]) for r in self._conn.execute("PRAGMA table_info(overtime)").fetchall()}
+            if "start_date" not in cols:
+                self._conn.execute("ALTER TABLE overtime ADD COLUMN start_date TEXT NOT NULL DEFAULT ''")
+            if "end_date" not in cols:
+                self._conn.execute("ALTER TABLE overtime ADD COLUMN end_date TEXT NOT NULL DEFAULT ''")
 
     def upsert_session(self, user_id: str, token: str, role: str, expires_at: str, tab_id: str) -> None:
         uid = str(user_id or "").strip()
@@ -582,10 +589,17 @@ class SQLiteDB:
                 u = self._conn.execute("SELECT emp_id FROM user WHERE user_id = ?", (int(r["approver_id"]),)).fetchone()
             if u:
                 approved_by = str(u["emp_id"])
+        start_date = str(r["start_date"] or "")
+        end_date = str(r["end_date"] or "")
+        date_display = str(r["apply_time"])[:10]
+        if start_date and end_date:
+            date_display = start_date if start_date == end_date else f"{start_date}~{end_date}"
         return {
             "id": r["ext_id"],
             "employee_id": r["emp_id"],
-            "date": str(r["apply_time"])[:10],
+            "date": date_display,
+            "start_date": start_date,
+            "end_date": end_date,
             "days": float(r["days"] or 0),
             "reason": r["reason"],
             "status": r["status"],
@@ -820,6 +834,13 @@ class SQLiteDB:
         emp_id = str(row.get("employee_id") or row.get("emp_id") or "").strip()
         if not emp_id:
             raise ValueError("employee_id 不能为空")
+        created_at = str(row.get("created_at") or row.get("apply_time") or "")
+        start_date = str(row.get("start_date") or row.get("date") or "").strip()
+        end_date = str(row.get("end_date") or row.get("start_date") or row.get("date") or "").strip()
+        if not start_date and created_at:
+            start_date = str(created_at)[:10]
+        if not end_date:
+            end_date = start_date
         days = float(row.get("days", 0) or 0)
         reason = str(row.get("reason") or "").strip()
         if not reason:
@@ -829,17 +850,18 @@ class SQLiteDB:
             status = "pending"
         approved_by = str(row.get("approved_by") or "").strip()
         approver_id = self._ensure_user_id_by_emp_id(approved_by) if approved_by else None
-        created_at = str(row.get("created_at") or row.get("apply_time") or "")
         approved_at = str(row.get("approved_at") or row.get("approve_time") or "") or None
         rejected_reason = str(row.get("rejected_reason") or row.get("reject_reason") or "") or None
         updated_at = str(row.get("updated_at") or row.get("update_time") or "")
         with self._lock:
             self._conn.execute(
-                "INSERT OR REPLACE INTO overtime(ext_id,emp_id,days,reason,apply_time,status,approver_id,approve_time,reject_reason,update_time) "
-                "VALUES (?,?,?,?,COALESCE(NULLIF(?,''),CURRENT_TIMESTAMP),?,?,?,?,COALESCE(NULLIF(?,''),CURRENT_TIMESTAMP))",
+                "INSERT OR REPLACE INTO overtime(ext_id,emp_id,start_date,end_date,days,reason,apply_time,status,approver_id,approve_time,reject_reason,update_time) "
+                "VALUES (?,?,?,?,?, ?,COALESCE(NULLIF(?,''),CURRENT_TIMESTAMP),?,?,?,?,COALESCE(NULLIF(?,''),CURRENT_TIMESTAMP))",
                 (
                     ext_id,
                     emp_id,
+                    start_date,
+                    end_date,
                     days,
                     reason,
                     created_at,
@@ -861,6 +883,12 @@ class SQLiteDB:
         if row.get("status") is not None:
             cols.append("status = ?")
             params.append(row.get("status"))
+        if row.get("start_date") is not None:
+            cols.append("start_date = ?")
+            params.append(str(row.get("start_date") or ""))
+        if row.get("end_date") is not None:
+            cols.append("end_date = ?")
+            params.append(str(row.get("end_date") or ""))
         if row.get("days") is not None:
             cols.append("days = ?")
             params.append(float(row.get("days") or 0))

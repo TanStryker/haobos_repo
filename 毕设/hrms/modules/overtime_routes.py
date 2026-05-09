@@ -1,4 +1,5 @@
 import uuid
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -12,9 +13,35 @@ router = APIRouter(tags=["overtime"])
 
 
 class OvertimeCreate(BaseModel):
-    date: str = Field(min_length=10, max_length=10)
-    days: float = Field(gt=0)
+    start_date: str | None = Field(default=None, min_length=10, max_length=10)
+    end_date: str | None = Field(default=None, min_length=10, max_length=10)
     reason: str = Field(min_length=1)
+    date: str | None = Field(default=None, min_length=10, max_length=10)
+    days: float | None = Field(default=None, gt=0)
+
+
+def _parse_date_yyyy_mm_dd(s: str) -> date:
+    try:
+        return date.fromisoformat(s)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="日期格式错误，应为 YYYY-MM-DD")
+
+
+def _resolve_range(payload: OvertimeCreate) -> tuple[str, str, float]:
+    if payload.start_date and payload.end_date:
+        sd = payload.start_date.strip()
+        ed = payload.end_date.strip()
+        sdt = _parse_date_yyyy_mm_dd(sd)
+        edt = _parse_date_yyyy_mm_dd(ed)
+        if edt < sdt:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="结束日期不能早于开始日期")
+        days = float((edt - sdt).days + 1)
+        return sd, ed, days
+    if payload.date and payload.days is not None:
+        d = payload.date.strip()
+        _parse_date_yyyy_mm_dd(d)
+        return d, d, float(payload.days)
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请填写加班起止日期")
 
 
 @router.post("/me/overtime", status_code=status.HTTP_201_CREATED)
@@ -26,11 +53,13 @@ def employee_submit_overtime(
     emp = db.find_one("employees", lambda e: e.get("employee_id") == user.user_id and e.get("active", True))
     if not emp:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="员工信息不存在")
+    start_date, end_date, days = _resolve_range(payload)
     row = {
         "id": str(uuid.uuid4()),
         "employee_id": user.user_id,
-        "date": payload.date,
-        "days": payload.days,
+        "start_date": start_date,
+        "end_date": end_date,
+        "days": days,
         "reason": payload.reason,
         "status": "pending",
         "created_at": now_iso(),
@@ -130,7 +159,7 @@ def admin_overtime_stats(
 ):
     approved = db.find_many(
         "overtime_requests",
-        lambda r: r.get("status") == "approved" and str(r.get("date", "")).startswith(month),
+        lambda r: r.get("status") == "approved" and str(r.get("start_date") or r.get("date") or "").startswith(month),
     )
     totals: dict[str, float] = {}
     for r in approved:

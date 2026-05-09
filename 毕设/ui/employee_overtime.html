@@ -13,8 +13,9 @@
       <div class="card">
         <h2>提交加班申请</h2>
         <div class="row">
-          <div><label>日期 (YYYY-MM-DD)</label><input id="date" placeholder="2026-04-01" /></div>
-          <div><label>加班天数</label><input id="days" type="number" step="0.5" /></div>
+          <div><label>开始日期 (YYYY-MM-DD)</label><input id="start_date" placeholder="2026-04-01" /></div>
+          <div><label>结束日期 (YYYY-MM-DD)</label><input id="end_date" placeholder="2026-04-03" /></div>
+          <div><label>加班天数</label><input id="days" disabled /></div>
           <div style="flex:1; min-width:260px;"><label>理由</label><input id="reason" style="min-width:260px; width:100%;" /></div>
           <div style="align-self:flex-end;"><button class="btn primary" id="btn_submit">提交</button></div>
         </div>
@@ -34,6 +35,17 @@
       </div>
     </div>
     <script>
+      function calcDays(sd, ed) {
+        const s = String(sd || "").trim();
+        const e = String(ed || "").trim();
+        if (!s || !e) return null;
+        const sdt = new Date(s + "T00:00:00");
+        const edt = new Date(e + "T00:00:00");
+        if (Number.isNaN(sdt.getTime()) || Number.isNaN(edt.getTime())) return null;
+        const diff = Math.floor((edt.getTime() - sdt.getTime()) / (24 * 3600 * 1000));
+        if (diff < 0) return null;
+        return diff + 1;
+      }
       async function load() {
         const data = await api("/me/overtime");
         const tbody = document.getElementById("tbody");
@@ -51,21 +63,35 @@
       document.addEventListener("DOMContentLoaded", async () => {
         if (!requireRole(["employee"])) return;
         await load();
+        const startEl = document.getElementById("start_date");
+        const endEl = document.getElementById("end_date");
+        const daysEl = document.getElementById("days");
+        const updateDays = () => {
+          const d = calcDays(startEl.value, endEl.value);
+          daysEl.value = d == null ? "" : String(d);
+        };
+        startEl.addEventListener("input", updateDays);
+        endEl.addEventListener("input", updateDays);
+        updateDays();
         document.getElementById("btn_submit").addEventListener("click", async () => {
           const msg = document.getElementById("msg");
           msg.className = "hint";
           msg.textContent = "";
           try {
+            const startDate = startEl.value.trim();
+            const endDate = endEl.value.trim();
+            const days = calcDays(startDate, endDate);
+            if (days == null) throw new Error("请填写有效的加班起止日期，且结束日期不能早于开始日期");
             await api("/me/overtime", {
               method: "POST",
               body: JSON.stringify({
-                date: document.getElementById("date").value.trim(),
-                days: Number(document.getElementById("days").value),
+                start_date: startDate,
+                end_date: endDate,
                 reason: document.getElementById("reason").value.trim(),
               })
             });
             msg.className = "ok";
-            msg.textContent = "提交成功";
+            msg.textContent = `提交成功（${days} 天）`;
             await load();
           } catch (e) {
             msg.className = "error";
@@ -76,4 +102,3 @@
     </script>
   </body>
 </html>
-

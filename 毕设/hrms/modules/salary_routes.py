@@ -29,7 +29,7 @@ def _attendance_days(db: SQLiteDB, employee_id: str, month: str) -> float:
 def _overtime_days(db: SQLiteDB, employee_id: str, month: str) -> float:
     records = db.find_many(
         "overtime_requests",
-        lambda r: r.get("employee_id") == employee_id and r.get("status") == "approved" and str(r.get("date", "")).startswith(month),
+        lambda r: r.get("employee_id") == employee_id and r.get("status") == "approved" and str(r.get("start_date") or r.get("date") or "").startswith(month),
     )
     total = 0.0
     for r in records:
